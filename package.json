@@ -9,7 +9,7 @@
     "preview": "vite preview --configLoader native --host localhost --port 4173 --strictPort"
   },
   "devDependencies": {
-    "vite": "^8.0.10",
+    "vite": "^7.3.2",
     "vite-plugin-pwa": "^1.2.0"
   },
   "dependencies": {
