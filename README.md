@@ -1,4 +1,4 @@
-# Japon 2026
+# BernatDuran.github.io
 
 Web multipagina construida con Vite para organizar un viaje a Japon con vistas por ciudad, herramientas de apoyo y un planificador de itinerario.
 
