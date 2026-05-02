@@ -27,6 +27,9 @@ let _dropdownPortal = null;
 let _dropdownPlaceId = null;
 let _sortableInstances = [];
 let _plannerMap = null;
+let _toastPortal = null;
+let _toastHideTimer = null;
+let _toastRemoveTimer = null;
 
 function destroyPlannerMap() {
   if (_plannerMap) {
@@ -50,6 +53,45 @@ function getDropdownPortal() {
     document.body.appendChild(_dropdownPortal);
   }
   return _dropdownPortal;
+}
+
+function getToastPortal() {
+  if (!_toastPortal) {
+    _toastPortal = document.createElement('div');
+    _toastPortal.className = 'planner-toast-stack';
+    document.body.appendChild(_toastPortal);
+  }
+  return _toastPortal;
+}
+
+function hideToast() {
+  if (!_toastPortal) return;
+  _toastPortal.classList.remove('is-visible');
+  if (_toastRemoveTimer) window.clearTimeout(_toastRemoveTimer);
+  _toastRemoveTimer = window.setTimeout(() => {
+    if (_toastPortal) _toastPortal.innerHTML = '';
+  }, 220);
+}
+
+function showToast(message, tone = 'success') {
+  const portal = getToastPortal();
+  if (_toastHideTimer) window.clearTimeout(_toastHideTimer);
+  if (_toastRemoveTimer) window.clearTimeout(_toastRemoveTimer);
+
+  portal.innerHTML = `
+    <div class="planner-toast planner-toast-${tone}" role="status" aria-live="polite">
+      <span class="planner-toast-icon" aria-hidden="true">${tone === 'success' ? '&#x2705;' : '&#x2139;&#xFE0F;'}</span>
+      <span class="planner-toast-message">${escapeHtml(message)}</span>
+    </div>
+  `;
+
+  requestAnimationFrame(() => {
+    portal.classList.add('is-visible');
+  });
+
+  _toastHideTimer = window.setTimeout(() => {
+    hideToast();
+  }, 2600);
 }
 
 function openDropdown(anchorEl, placeId) {
@@ -152,6 +194,57 @@ function formatDayLabel(dayNum) {
   const weekday = date.toLocaleDateString('es-ES', { weekday: 'short' });
   const dayMonth = date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
   return `D&iacute;a ${dayNum} &middot; ${weekday} ${dayMonth}`;
+}
+
+function getPlaceName(placeId) {
+  return _places.find((place) => place.id === placeId)?.name || 'Actividad';
+}
+
+function getDropToastMessage(evt) {
+  const placeId = evt.item?.dataset?.id;
+  const placeName = getPlaceName(placeId);
+  const fromDay = Number.parseInt(evt.from?.closest('.planner-day-block')?.dataset.day || '', 10);
+  const toDay = Number.parseInt(evt.to?.closest('.planner-day-block')?.dataset.day || '', 10);
+  const fromZone = getZoneFromElement(evt.from);
+  const toZone = getZoneFromElement(evt.to);
+  const movedBetweenContainers = evt.from !== evt.to;
+
+  if (toZone === 'day' && Number.isFinite(toDay)) {
+    if (fromZone === 'tray' || (Number.isFinite(fromDay) && fromDay !== toDay)) {
+      return `${placeName} movida al Dia ${toDay}. Ruta actualizada.`;
+    }
+    return `Orden del Dia ${toDay} actualizado.`;
+  }
+
+  if (toZone === 'tray') {
+    if (fromZone === 'day' && Number.isFinite(fromDay) && movedBetweenContainers) {
+      return `${placeName} enviada a bandeja. Ruta actualizada.`;
+    }
+    if (fromZone === 'tray') {
+      return 'Bandeja actualizada.';
+    }
+  }
+
+  return 'Plan actualizado.';
+}
+
+function getStateToastMessage(placeId, newStatus, assignedDay) {
+  const placeName = getPlaceName(placeId);
+
+  if (newStatus === 'planned' && assignedDay) {
+    return `${placeName} asignada al Dia ${assignedDay}. Ruta actualizada.`;
+  }
+  if (newStatus === 'in-tray') {
+    return `${placeName} enviada a bandeja.`;
+  }
+  if (newStatus === 'done') {
+    return `${placeName} marcada como realizada.`;
+  }
+  if (newStatus === 'discarded') {
+    return `${placeName} descartada del plan.`;
+  }
+
+  return 'Estado actualizado.';
 }
 
 function getCityName(cityId) {
@@ -657,6 +750,8 @@ async function handleDropEnd(evt) {
     return;
   }
 
+  const toastMessage = getDropToastMessage(evt);
+
   updates.forEach((update) => {
     const existing = _plannerItems.find((item) => item.placeId === update.placeId);
     if (existing) {
@@ -670,6 +765,7 @@ async function handleDropEnd(evt) {
 
   await putAll('planner', updates);
   renderPlannerPage();
+  showToast(toastMessage);
 }
 
 function initSortable() {
@@ -713,6 +809,7 @@ function initSortable() {
 }
 
 async function setPlannerState(placeId, newStatus, assignedDay) {
+  const toastMessage = getStateToastMessage(placeId, newStatus, assignedDay);
   let item = _plannerItems.find((p) => p.placeId === placeId);
   if (!item) {
     item = { placeId, status: newStatus, assignedDay, order: 0 };
@@ -725,6 +822,7 @@ async function setPlannerState(placeId, newStatus, assignedDay) {
   await putAll('planner', [item]);
   closePlaceModal();
   renderPlannerPage();
+  showToast(toastMessage);
 }
 
 function handlePageClick(e) {
