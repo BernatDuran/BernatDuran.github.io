@@ -99,10 +99,6 @@ Workflow principal:
 
 - `.github/workflows/deploy.yml`
 
-Guia paso a paso de GitHub y despliegue:
-
-- [github_deployment_guide.md](./github_deployment_guide.md)
-
 ## Estado actual del producto
 
 Hoy la app esta orientada a un caso de uso muy concreto: organizar un viaje a Japon 2026 con contenido editorial, gestion de lugares y planificacion diaria. No es una plantilla generica todavia, sino una aplicacion personalizada sobre ese viaje.
