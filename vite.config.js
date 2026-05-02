@@ -20,8 +20,14 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['favicon.svg', 'icon.svg', 'icons.svg'],
       devOptions: {
         enabled: true
+      },
+      workbox: {
+        // IMPORTANTE: Desactivamos el fallback a index.html para que city.html y otras páginas funcionen como archivos independientes
+        navigateFallback: null,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}']
       },
       manifest: {
         name: 'Guia Japon 2026',
