@@ -24,9 +24,9 @@ export default defineConfig({
         enabled: true
       },
       manifest: {
-        name: 'Guía Japón 2026',
-        short_name: 'Japón 2026',
-        description: 'Guía de viaje offline para Tokio, Kioto y Osaka',
+        name: 'Guia Japon 2026',
+        short_name: 'Japon 2026',
+        description: 'Guia de viaje offline para Tokio, Kioto y Osaka',
         theme_color: '#fafaf7',
         background_color: '#fafaf7',
         display: 'standalone',
