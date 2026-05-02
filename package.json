@@ -1,0 +1,19 @@
+{
+  "name": "v0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader native --host localhost --port 5173 --strictPort",
+    "build": "vite build --configLoader native",
+    "preview": "vite preview --configLoader native --host localhost --port 4173 --strictPort"
+  },
+  "devDependencies": {
+    "vite": "^8.0.10",
+    "vite-plugin-pwa": "^1.2.0"
+  },
+  "dependencies": {
+    "sortablejs": "^1.15.7",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,135 @@
+/* === DESIGN SYSTEM: JAPAN TRAVEL GUIDE === */
+
+/* --- Google Fonts --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+
+/* --- CSS Reset --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body { font-family: 'Inter', 'Noto Sans JP', sans-serif; color: var(--text-primary); background: var(--bg-primary); line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+img { max-width: 100%; display: block; }
+button { cursor: pointer; border: none; background: none; font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+ul, ol { list-style: none; }
+input, select { font-family: inherit; font-size: inherit; }
+
+/* --- Design Tokens --- */
+:root {
+  /* Colors */
+  --primary: #1a1a2e;
+  --accent: #e94560;
+  --accent-light: #f8b4c8;
+  --accent-dark: #c23152;
+  --bg-primary: #fafaf7;
+  --bg-secondary: #f0efe9;
+  --bg-card: #ffffff;
+  --bg-dark: #16213e;
+  --text-primary: #1a1a2e;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --text-inverse: #fafaf7;
+  --border: #e5e5e0;
+  --border-light: #f0efe9;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 10px 30px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.05);
+  --shadow-xl: 0 20px 50px rgba(0,0,0,0.12);
+
+  /* City Colors */
+  --tokyo: #3b82f6;
+  --tokyo-light: #dbeafe;
+  --tokyo-dark: #1e3a5f;
+  --kyoto: #d97706;
+  --kyoto-light: #fef3c7;
+  --kyoto-dark: #78350f;
+  --osaka: #ef4444;
+  --osaka-light: #fee2e2;
+  --osaka-dark: #7f1d1d;
+
+  /* Priority Colors */
+  --must-see: #ef4444;
+  --must-see-bg: #fef2f2;
+  --recommended: #f59e0b;
+  --recommended-bg: #fffbeb;
+  --optional: #6b7280;
+  --optional-bg: #f9fafb;
+
+  /* Typography */
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-ja: 'Noto Sans JP', sans-serif;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --space-4xl: 96px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 999px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-base: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* Layout */
+  --container-max: 1200px;
+  --container-narrow: 900px;
+  --nav-height: 64px;
+}
+
+/* --- Layout Utilities --- */
+.container { max-width: var(--container-max); margin: 0 auto; padding: 0 var(--space-md); }
+.container-narrow { max-width: var(--container-narrow); margin: 0 auto; padding: 0 var(--space-md); }
+.section { padding: var(--space-3xl) 0; }
+.section-sm { padding: var(--space-2xl) 0; }
+
+/* --- Typography --- */
+h1, h2, h3, h4, h5 { font-family: var(--font-heading); font-weight: 700; line-height: 1.2; color: var(--text-primary); }
+h1 { font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 800; }
+h2 { font-size: clamp(1.5rem, 3.5vw, 2.25rem); }
+h3 { font-size: clamp(1.2rem, 2.5vw, 1.5rem); }
+h4 { font-size: 1.1rem; }
+.text-ja { font-family: var(--font-ja); }
+.text-sm { font-size: 0.875rem; }
+.text-xs { font-size: 0.75rem; }
+.text-lg { font-size: 1.125rem; }
+.text-secondary { color: var(--text-secondary); }
+.text-center { text-align: center; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+
+/* --- Animations --- */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes floatSlow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+.animate-fade-in-up { animation: fadeInUp 0.6s ease forwards; opacity: 0; }
+.animate-fade-in { animation: fadeIn 0.4s ease forwards; }
+
+/* Staggered animations */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+
+/* --- Scrollbar --- */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* --- Selection --- */
+::selection { background: var(--accent-light); color: var(--text-primary); }
