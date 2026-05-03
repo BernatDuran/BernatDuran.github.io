@@ -8,8 +8,9 @@ import { initLeafletMap, updateMapMarkers, renderPlaceMap, getGoogleMapsUrl } fr
 import { registerSW } from 'virtual:pwa-register';
 import { getById, getAll, putAll } from './utils/db.js';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
-import { sortCities } from './utils/cityData.js';
+import { formatRecommendedDays, sortCities } from './utils/cityData.js';
 import { BEST_TIME_OPTIONS, formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
+import { runDataMigration } from './utils/dataMigration.js';
 // Register PWA Service Worker
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
@@ -62,6 +63,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     priority: '',
     zone: '',
     timeOfDay: '',
+    scoreBands: [],
     plannerFilter: '', // '', 'none', 'in-tray', 'planned', 'done', 'discarded'
     plannerDay: '',
     rainyFriendly: false
@@ -70,6 +72,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   let plannerItems = initialPlannerItems || [];
   let mapInstance = null;
   let savedMapElement = null;
+  let scoreDropdownOpen = false;
 
   function captureInputFocusState() {
     const activeElement = document.activeElement;
@@ -84,6 +87,13 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       selectionStart: activeElement.selectionStart,
       selectionEnd: activeElement.selectionEnd
     };
+  }
+
+  function restoreTransientUiState() {
+    requestAnimationFrame(() => {
+      if (!scoreDropdownOpen) return;
+      document.querySelector('.score-filter-group')?.setAttribute('open', '');
+    });
   }
 
   function restoreInputFocusState(focusState) {
@@ -184,6 +194,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
               <option value="tarde" ${state.timeOfDay === 'tarde' ? 'selected' : ''}>&#x1F307; Tarde</option>
               <option value="noche" ${state.timeOfDay === 'noche' ? 'selected' : ''}>&#x1F319; Noche</option>
             </select>
+            ${renderScoreFilters()}
             <select id="status-filter" class="zone-select">
               <option value="">Todos los estados</option>
               <option value="none" ${state.plannerFilter === 'none' ? 'selected' : ''}>Sin asignar</option>
@@ -221,6 +232,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     `;
     attachEvents();
     restoreInputFocusState(focusState);
+    restoreTransientUiState();
     
     // Restore or Initialize map
     if (savedMapElement) {
@@ -282,7 +294,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     return `<div class="city-summary">
       <div class="summary-card"><div class="summary-card-icon">&#x1F3AF;</div><h4>Experiencia</h4><p>${city.summary}</p></div>
       <div class="summary-card"><div class="summary-card-icon">&#x1F465;</div><h4>Ideal para</h4><p>${city.idealFor}</p></div>
-      <div class="summary-card"><div class="summary-card-icon">&#x1F4CA;</div><h4>En n&uacute;meros</h4><p>${allPlaces.length} lugares &middot; ${mustSeeCount} imprescindibles &middot; ${city.zones.length} zonas &middot; ${city.recommendedDays} recomendados</p></div>
+      <div class="summary-card"><div class="summary-card-icon">&#x1F4CA;</div><h4>En n&uacute;meros</h4><p>${allPlaces.length} lugares &middot; ${mustSeeCount} imprescindibles &middot; ${city.zones.length} zonas &middot; ${formatRecommendedDays(city.recommendedDays)}</p></div>
     </div>`;
   }
 
@@ -294,6 +306,42 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
         .map(c => `<option value="${c.id}" ${state.category === c.id ? 'selected' : ''}>${c.icon} ${c.label}</option>`)
         .join('')}
     </select>`;
+  }
+
+  function renderScoreFilters() {
+    const scoreOptions = [
+      { value: 'all', label: 'Todas' },
+      { value: '0-4', label: '0-4' },
+      { value: '5-6', label: '5-6' },
+      { value: '7-8', label: '7-8' },
+      { value: '9', label: '9' },
+      { value: '10', label: '10' }
+    ];
+
+    const hasSpecificSelection = state.scoreBands.length > 0;
+
+    const summaryLabel = !hasSpecificSelection
+      ? '&#x2B50; Todas'
+      : `&#x2B50; ${state.scoreBands.join(', ')}`;
+
+    return `
+      <details class="multi-select-dropdown score-filter-group">
+        <summary class="zone-select multi-select-summary">${summaryLabel}</summary>
+        <div class="multi-select-panel">
+          ${scoreOptions.map((option) => {
+            const checked = option.value === 'all'
+              ? !hasSpecificSelection
+              : state.scoreBands.includes(option.value);
+            return `
+              <label class="multi-select-option">
+                <input type="checkbox" data-score-band="${option.value}" ${checked ? 'checked' : ''}>
+                <span>&#x2B50; ${option.label}</span>
+              </label>
+            `;
+          }).join('')}
+        </div>
+      </details>
+    `;
   }
 
   function renderPriorityFilters(iconOnly = false) {
@@ -380,15 +428,19 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       </div>
       <div class="place-card-desc">${place.description}</div>
       <div class="place-card-meta">
-        <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
-        <span class="place-card-zone">${place.zone}</span>
-        ${place.estimatedDuration ? `<span class="place-card-duration"><span class="place-card-duration-icon">${icons.clock}</span><span class="place-card-duration-text">${place.estimatedDuration}</span></span>` : ''}
-        <div style="margin-left:auto; display:flex; align-items:center; gap:6px;" onclick="event.stopPropagation()">
-          ${scoreText ? `<span style="font-size:0.85rem; font-weight:bold; color:var(--text-secondary); margin-right:2px;">&#x2B50; ${scoreText}</span>` : ''}
+        <div class="place-card-meta-top">
+          <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
+          <span class="place-card-zone">${place.zone}</span>
+        </div>
+        <div class="place-card-meta-bottom">
+          ${place.estimatedDuration ? `<span class="place-card-duration"><span class="place-card-duration-icon">${icons.clock}</span><span class="place-card-duration-text">${place.estimatedDuration}</span></span>` : '<span></span>'}
+          <div class="place-card-meta-actions" onclick="event.stopPropagation()">
+          ${scoreText ? `<span class="place-card-score">&#x2B50; ${scoreText}</span>` : ''}
           ${getUmbrellaSVG(place.rainyFriendly, false, place.id)}
           <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#f1f5f9; color:#3b82f6; transition:all 0.2s;" onmouseover="this.style.background='#e2e8f0'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='#f1f5f9'; this.style.transform='scale(1)';">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
           </a>
+        </div>
         </div>
       </div>
     </div>`;
@@ -426,6 +478,8 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
         ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos pr&aacute;cticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
         <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
         <div class="modal-info-grid">
+          <div class="modal-info-item"><span class="modal-info-label">&#x1F4CD; Zona</span><span class="modal-info-value">${place.zone || 'Pendiente'}</span></div>
+          <div class="modal-info-item"><span class="modal-info-label">${cat?.icon || '&#x1F4CC;'} Categor&iacute;a</span><span class="modal-info-value">${cat?.label || 'Pendiente'}</span></div>
           <div class="modal-info-item"><span class="modal-info-label">&#x23F1;&#xFE0F; Duraci&oacute;n estimada</span><span class="modal-info-value">${place.estimatedDuration || 'Pendiente'}</span></div>
           <div class="modal-info-item"><span class="modal-info-label">${getTimeIcon(place.bestTime)} Mejor momento</span><span class="modal-info-value">${formatBestTimeLabel(place.bestTime)}</span></div>
           ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">&#x2B50; Puntuaci&oacute;n</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
@@ -631,7 +685,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   }
 
   function hasActiveFilters() {
-    return state.search || state.category || state.priority || state.zone || state.timeOfDay || state.plannerFilter || state.plannerDay || state.rainyFriendly;
+    return state.search || state.category || state.priority || state.zone || state.timeOfDay || state.scoreBands.length || state.plannerFilter || state.plannerDay || state.rainyFriendly;
   }
 
   function attachEvents() {
@@ -663,6 +717,27 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     // Time select
     document.getElementById('time-filter')?.addEventListener('change', e => { state.timeOfDay = e.target.value; render(); });
 
+    // Score filters
+    document.querySelectorAll('input[data-score-band]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const value = input.dataset.scoreBand;
+        scoreDropdownOpen = true;
+        if (value === 'all') {
+          state.scoreBands = [];
+        } else if (input.checked) {
+          state.scoreBands = Array.from(new Set([...state.scoreBands, value]));
+        } else {
+          state.scoreBands = state.scoreBands.filter((band) => band !== value);
+        }
+        render();
+      });
+    });
+
+    document.querySelector('.score-filter-group')?.addEventListener('toggle', (event) => {
+      scoreDropdownOpen = event.currentTarget.open;
+    });
+
+
     // Status select
     document.getElementById('status-filter')?.addEventListener('change', e => { state.plannerFilter = e.target.value; render(); });
 
@@ -676,7 +751,8 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
 
     // Clear filters
     document.getElementById('clear-filters')?.addEventListener('click', () => {
-      state = { search: '', category: '', priority: '', zone: '', timeOfDay: '', plannerFilter: '', plannerDay: '', rainyFriendly: false };
+      state = { search: '', category: '', priority: '', zone: '', timeOfDay: '', scoreBands: [], plannerFilter: '', plannerDay: '', rainyFriendly: false };
+      scoreDropdownOpen = false;
       render();
     });
 
@@ -791,11 +867,23 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     window.__plannerEventsAttached = true;
   }
 
+  if (!window.__cityScoreDropdownOutsideBound) {
+    window.__cityScoreDropdownOutsideBound = true;
+    document.addEventListener('click', (event) => {
+      const openDropdown = document.querySelector('.score-filter-group[open]');
+      if (!openDropdown) return;
+      if (event.target.closest('.score-filter-group')) return;
+      openDropdown.removeAttribute('open');
+      scoreDropdownOpen = false;
+    });
+  }
+
   // Initial render
   render();
 }
 
 async function boot() {
+  await runDataMigration();
   const urlParams = new URLSearchParams(window.location.search);
   const cityId = urlParams.get('id');
   
@@ -810,7 +898,7 @@ async function boot() {
     return;
   }
 
-  const allPlaces = await getAll('places');
+  const allPlaces = (await getAll('places')).map((place) => normalizePlaceRecord(place));
   const places = allPlaces.filter(p => p.cityId === cityId);
   const citiesArray = sortCities(await getAll('cities'));
   const plannerItems = await getAll('planner');

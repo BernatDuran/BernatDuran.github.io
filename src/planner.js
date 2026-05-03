@@ -8,7 +8,8 @@ import { registerSW } from 'virtual:pwa-register';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { sortCities } from './utils/cityData.js';
-import { formatBestTimeLabel } from './utils/placeData.js';
+import { formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
+import { runDataMigration } from './utils/dataMigration.js';
 
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
@@ -25,7 +26,7 @@ let _totalTripDays = 7;
 let _citiesArray = [];
 let _viewMode = 'calendar';
 let _selectedMapScope = 'all';
-let _plannerFilterState = { search: '', cityId: '', priority: '' };
+let _plannerFilterState = { search: '', cityId: '', priority: '', scoreBands: [] };
 
 let _dropdownPortal = null;
 let _dropdownPlaceId = null;
@@ -34,6 +35,7 @@ let _plannerMap = null;
 let _toastPortal = null;
 let _toastHideTimer = null;
 let _toastRemoveTimer = null;
+let _plannerScoreDropdownOpen = false;
 
 function captureInputFocusState() {
   const activeElement = document.activeElement;
@@ -61,6 +63,13 @@ function restoreInputFocusState(focusState) {
     if (typeof focusState.selectionStart === 'number' && typeof focusState.selectionEnd === 'number') {
       input.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
     }
+  });
+}
+
+function restoreTransientUiState() {
+  requestAnimationFrame(() => {
+    if (!_plannerScoreDropdownOpen) return;
+    document.querySelector('.score-filter-group')?.setAttribute('open', '');
   });
 }
 
@@ -298,6 +307,19 @@ function getFilteredPlannerPlaces() {
   return _places.filter((place) => {
     if (_plannerFilterState.cityId && place.cityId !== _plannerFilterState.cityId) return false;
     if (_plannerFilterState.priority && place.priority !== _plannerFilterState.priority) return false;
+    if (_plannerFilterState.scoreBands.length > 0) {
+      const numericScore = place.score == null ? null : Number(place.score);
+      const matchesScoreBand = _plannerFilterState.scoreBands.some((band) => {
+        if (!Number.isFinite(numericScore)) return false;
+        if (band === '0-4') return numericScore >= 0 && numericScore <= 4;
+        if (band === '5-6') return numericScore >= 5 && numericScore <= 6;
+        if (band === '7-8') return numericScore >= 7 && numericScore <= 8;
+        if (band === '9') return numericScore === 9;
+        if (band === '10') return numericScore === 10;
+        return false;
+      });
+      if (!matchesScoreBand) return false;
+    }
 
     if (searchQuery) {
       const category = categories.find((entry) => entry.id === place.category);
@@ -319,7 +341,7 @@ function getFilteredPlannerPlaces() {
 }
 
 function hasActivePlannerFilters() {
-  return Boolean(_plannerFilterState.search || _plannerFilterState.cityId || _plannerFilterState.priority);
+  return Boolean(_plannerFilterState.search || _plannerFilterState.cityId || _plannerFilterState.priority || _plannerFilterState.scoreBands.length);
 }
 
 function buildGroupedData(filteredPlaces = _places) {
@@ -358,6 +380,42 @@ function renderPlannerPriorityFilters(iconOnly = false) {
     .join('');
 }
 
+function renderPlannerScoreFilters() {
+  const scoreOptions = [
+    { value: 'all', label: 'Todas' },
+    { value: '0-4', label: '0-4' },
+    { value: '5-6', label: '5-6' },
+    { value: '7-8', label: '7-8' },
+    { value: '9', label: '9' },
+    { value: '10', label: '10' }
+  ];
+
+  const hasSpecificSelection = _plannerFilterState.scoreBands.length > 0;
+
+  const summaryLabel = !hasSpecificSelection
+    ? '&#x2B50; Todas'
+    : `&#x2B50; ${_plannerFilterState.scoreBands.join(', ')}`;
+
+  return `
+    <details class="multi-select-dropdown score-filter-group">
+      <summary class="zone-select multi-select-summary">${summaryLabel}</summary>
+      <div class="multi-select-panel">
+        ${scoreOptions.map((option) => {
+          const checked = option.value === 'all'
+            ? !hasSpecificSelection
+            : _plannerFilterState.scoreBands.includes(option.value);
+          return `
+            <label class="multi-select-option">
+              <input type="checkbox" data-planner-score-band="${option.value}" ${checked ? 'checked' : ''}>
+              <span>&#x2B50; ${option.label}</span>
+            </label>
+          `;
+        }).join('')}
+      </div>
+    </details>
+  `;
+}
+
 function renderPlannerFilters(filteredCount) {
   return `
     <div class="filters-section" id="planner-filters-section">
@@ -379,6 +437,7 @@ function renderPlannerFilters(filteredCount) {
             <option value="">Todas las ciudades</option>
             ${_citiesArray.map((city) => `<option value="${city.id}" ${_plannerFilterState.cityId === city.id ? 'selected' : ''}>${city.name}</option>`).join('')}
           </select>
+          ${renderPlannerScoreFilters()}
         </div>
       </div>
     </div>
@@ -699,6 +758,7 @@ function renderPlannerPage() {
   bindMobileNav('mobile-toggle', 'mobile-menu');
   attachPlannerFilterEvents();
   restoreInputFocusState(focusState);
+  restoreTransientUiState();
 
   if (_viewMode === 'calendar') {
     initSortable();
@@ -812,6 +872,25 @@ function attachPlannerFilterEvents() {
     renderPlannerPage();
   });
 
+  document.querySelectorAll('input[data-planner-score-band]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const value = input.dataset.plannerScoreBand;
+      _plannerScoreDropdownOpen = true;
+      if (value === 'all') {
+        _plannerFilterState.scoreBands = [];
+      } else if (input.checked) {
+        _plannerFilterState.scoreBands = Array.from(new Set([..._plannerFilterState.scoreBands, value]));
+      } else {
+        _plannerFilterState.scoreBands = _plannerFilterState.scoreBands.filter((band) => band !== value);
+      }
+      renderPlannerPage();
+    });
+  });
+
+  document.querySelector('.score-filter-group')?.addEventListener('toggle', (event) => {
+    _plannerScoreDropdownOpen = event.currentTarget.open;
+  });
+
   document.querySelectorAll('[data-planner-priority]').forEach((button) => {
     button.addEventListener('click', () => {
       const value = button.dataset.plannerPriority;
@@ -821,7 +900,8 @@ function attachPlannerFilterEvents() {
   });
 
   document.getElementById('planner-clear-filters')?.addEventListener('click', () => {
-    _plannerFilterState = { search: '', cityId: '', priority: '' };
+    _plannerFilterState = { search: '', cityId: '', priority: '', scoreBands: [] };
+    _plannerScoreDropdownOpen = false;
     renderPlannerPage();
   });
 }
@@ -1043,15 +1123,27 @@ function handlePageChange(e) {
 document.addEventListener('click', handlePageClick);
 document.addEventListener('change', handlePageChange);
 
+if (!window.__plannerScoreDropdownOutsideBound) {
+  window.__plannerScoreDropdownOutsideBound = true;
+  document.addEventListener('click', (event) => {
+    const openDropdown = document.querySelector('.score-filter-group[open]');
+    if (!openDropdown) return;
+    if (event.target.closest('.score-filter-group')) return;
+    openDropdown.removeAttribute('open');
+    _plannerScoreDropdownOpen = false;
+  });
+}
+
 window.addEventListener('scroll', () => {
   document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
 });
 
 async function boot() {
+  await runDataMigration();
   const settingsArray = (await getAll('settings')) || [];
   _globalSettings = settingsArray.find((s) => s.id === 'global') || {};
 
-  _places = await getAll('places');
+  _places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
   _plannerItems = (await getAll('planner')) || [];
   _citiesArray = sortCities(await getAll('cities'));
   _totalTripDays = calcTripDays(_globalSettings);
