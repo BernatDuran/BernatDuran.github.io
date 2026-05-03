@@ -1,4 +1,4 @@
-import './styles/main.css';
+﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import { categories, priorityLabels } from './data/cities.js';
@@ -7,6 +7,9 @@ import { icons, formatScore, debounce, getTimeIcon } from './utils/helpers.js';
 import { initLeafletMap, updateMapMarkers, renderPlaceMap, getGoogleMapsUrl } from './utils/maps.js';
 import { registerSW } from 'virtual:pwa-register';
 import { getById, getAll, putAll } from './utils/db.js';
+import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
+import { sortCities } from './utils/cityData.js';
+import { BEST_TIME_OPTIONS, formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
 // Register PWA Service Worker
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
@@ -16,8 +19,32 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   const app = document.getElementById('app');
   const cityColor = cityMeta.color;
 
+  function slugifyPlaceSegment(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .replace(/-{2,}/g, '-');
+  }
+
+  function buildAutoPlaceId(name, existingId = null) {
+    const baseSlug = slugifyPlaceSegment(name) || 'actividad';
+    const baseId = `${cityMeta.id}-${baseSlug}`;
+    let candidate = baseId;
+    let suffix = 2;
+
+    while (places.some((entry) => entry.id === candidate && entry.id !== existingId)) {
+      candidate = `${baseId}-${suffix}`;
+      suffix += 1;
+    }
+
+    return candidate;
+  }
+
   let totalTripDays = 1;
-  let datesFormatted = '30 junio — 16 julio 2026';
+  let datesFormatted = '30 junio &mdash; 16 julio 2026';
   if (globalSettings && globalSettings.startDate && globalSettings.endDate) {
     const start = new Date(globalSettings.startDate);
     const end = new Date(globalSettings.endDate);
@@ -25,7 +52,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     if (days >= 1 && !isNaN(days)) totalTripDays = days;
     const formattedStart = start.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
     const formattedEnd = end.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
-    datesFormatted = `${formattedStart} — ${formattedEnd}`;
+    datesFormatted = `${formattedStart} &mdash; ${formattedEnd}`;
   }
 
   // State
@@ -43,6 +70,35 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   let plannerItems = initialPlannerItems || [];
   let mapInstance = null;
   let savedMapElement = null;
+
+  function captureInputFocusState() {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLInputElement) && !(activeElement instanceof HTMLTextAreaElement)) {
+      return null;
+    }
+
+    if (!activeElement.id) return null;
+
+    return {
+      id: activeElement.id,
+      selectionStart: activeElement.selectionStart,
+      selectionEnd: activeElement.selectionEnd
+    };
+  }
+
+  function restoreInputFocusState(focusState) {
+    if (!focusState?.id) return;
+
+    requestAnimationFrame(() => {
+      const input = document.getElementById(focusState.id);
+      if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) return;
+
+      input.focus({ preventScroll: true });
+      if (typeof focusState.selectionStart === 'number' && typeof focusState.selectionEnd === 'number') {
+        input.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+      }
+    });
+  }
 
   function getPlannerItem(placeId) {
     return plannerItems.find(p => p.placeId === placeId) || {};
@@ -72,6 +128,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   }
 
   function render() {
+    const focusState = captureInputFocusState();
     const oldMapContainer = document.getElementById('city-map-container');
     if (oldMapContainer && mapInstance) {
       savedMapElement = oldMapContainer;
@@ -90,33 +147,42 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
           ${renderSummary(cityMeta, places, mustSeeCount)}
         </div>
       </section>
+      <section class="section-sm" style="padding-top:0;">
+        <div class="container">
+          <div class="city-action-bar">
+            <div>
+              <div class="city-action-title">Gesti&oacute;n de actividades</div>
+            </div>
+            <button class="maps-link-btn city-create-btn" id="btn-create-place">&#x2795; Nueva actividad</button>
+          </div>
+        </div>
+      </section>
       <div class="filters-section" id="filters-section">
         <div class="filters-inner">
-          <div class="filters-row">
+          <div class="filters-row filters-row-search">
             <div class="search-bar-container" style="flex:1;max-width:400px;">
               <span class="search-bar-icon">${icons.search}</span>
               <input type="text" class="search-bar" id="search-input" placeholder="Buscar lugar, zona o tipo..." value="${state.search}">
-              <button class="search-clear ${state.search ? 'visible' : ''}" id="search-clear">✕</button>
+              <button class="search-clear ${state.search ? 'visible' : ''}" id="search-clear">&#x2715;</button>
+            </div>
+            <div class="filters-inline-actions">
+              ${renderPriorityFilters(false)}
+              <span class="nav-separator filter-soft-separator" aria-hidden="true">|</span>
+              <button class="filter-pill ${state.rainyFriendly ? 'active' : ''}" id="rainy-filter">&#x2614; Solo lluvia</button>
             </div>
             <span class="results-count" id="results-count">${filtered.length} de ${places.length} lugares</span>
           </div>
-          <div class="filters-row">
-            <span class="filter-label">Categoría</span>
+          <div class="filters-row filters-row-controls">
             ${renderCategoryFilters()}
-          </div>
-          <div class="filters-row">
-            <span class="filter-label">Prioridad</span>
-            ${renderPriorityFilters()}
-            <div class="filter-divider"></div>
             <select class="zone-select" id="zone-select">
               <option value="">Todas las zonas</option>
               ${zones.map(z => `<option value="${z}" ${state.zone === z ? 'selected' : ''}>${z}</option>`).join('')}
             </select>
             <select id="time-filter" class="zone-select">
-              <option value="">⏰ Momento</option>
-              <option value="mañana" ${state.timeOfDay === 'mañana' ? 'selected' : ''}>☀️ Mañana</option>
-              <option value="tarde" ${state.timeOfDay === 'tarde' ? 'selected' : ''}>🌇 Tarde</option>
-              <option value="noche" ${state.timeOfDay === 'noche' ? 'selected' : ''}>🌙 Noche</option>
+              <option value="" ${state.timeOfDay === '' ? 'selected' : ''}>&#x1F551; Cualquier momento</option>
+              <option value="mañana" ${state.timeOfDay === 'mañana' ? 'selected' : ''}>&#x2600;&#xFE0F; Ma&ntilde;ana</option>
+              <option value="tarde" ${state.timeOfDay === 'tarde' ? 'selected' : ''}>&#x1F307; Tarde</option>
+              <option value="noche" ${state.timeOfDay === 'noche' ? 'selected' : ''}>&#x1F319; Noche</option>
             </select>
             <select id="status-filter" class="zone-select">
               <option value="">Todos los estados</option>
@@ -127,10 +193,9 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
               <option value="discarded" ${state.plannerFilter === 'discarded' ? 'selected' : ''}>Descartado</option>
             </select>
             <select id="day-filter" class="zone-select">
-              <option value="">Todos los días</option>
-              ${Array.from({length: totalTripDays}, (_, i) => `<option value="${i+1}" ${state.plannerDay === String(i+1) ? 'selected' : ''}>Día ${i+1}</option>`).join('')}
+              <option value="">Todos los d&iacute;as</option>
+              ${Array.from({length: totalTripDays}, (_, i) => `<option value="${i+1}" ${state.plannerDay === String(i+1) ? 'selected' : ''}>D&iacute;a ${i+1}</option>`).join('')}
             </select>
-            <button class="filter-pill ${state.rainyFriendly ? 'active' : ''}" id="rainy-filter">☔ Solo Lluvia</button>
             ${hasActiveFilters() ? `<button class="clear-filters" id="clear-filters">Limpiar filtros</button>` : ''}
           </div>
         </div>
@@ -138,24 +203,24 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <section class="section-sm">
         <div class="container">
           ${filtered.length > 0 ? `<div class="places-grid" id="places-grid">${filtered.map(p => renderPlaceCard(p)).join('')}</div>` :
-            `<div class="empty-state"><div class="empty-state-icon">🔍</div><h3>No se encontraron lugares</h3><p>Prueba a cambiar los filtros o el texto de búsqueda</p></div>`}
+            `<div class="empty-state"><div class="empty-state-icon">&#x1F50D;</div><h3>No se encontraron lugares</h3><p>Prueba a cambiar los filtros o el texto de b&uacute;squeda</p></div>`}
         </div>
       </section>
       
       <section class="city-map-section section-sm">
         <div class="container">
-          <div class="home-section-title"><h2>🗺️ Mapa Interactivo</h2><p>Explora la ciudad y encuentra lugares cercanos</p></div>
+          <div class="home-section-title"><h2>&#x1F5FA;&#xFE0F; Mapa Interactivo</h2><p>Explora la ciudad y encuentra lugares cercanos</p></div>
           <div id="map-placeholder-div"><div id="city-map-container" class="city-map-container"></div></div>
         </div>
       </section>
       
       ${renderItineraries(cityMeta, places)}
-      ${renderTips(cityMeta)}
       ${renderFooter()}
       <div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal"></div></div>
       <button class="back-to-top" id="back-to-top">${icons.chevronUp}</button>
     `;
     attachEvents();
+    restoreInputFocusState(focusState);
     
     // Restore or Initialize map
     if (savedMapElement) {
@@ -176,27 +241,28 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   }
 
   function renderNav(city, citiesArray) {
-    const plannerLink = globalSettings?.plannerEnabled ? `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">🗓️ Planner</a>` : '';
+    const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
     return `<nav class="nav" id="main-nav">
       <div class="nav-inner">
-        <a href="/" class="nav-logo">🇯🇵 Japón 2026 <span class="ja">日本</span></a>
+        <a href="/" class="nav-logo">&#x1F1EF;&#x1F1F5; Jap&oacute;n 2026 <span class="ja">&#x65E5;&#x672C;</span></a>
         <div class="nav-links">
           <a href="/">Inicio</a>
+          <span class="nav-separator" aria-hidden="true">|</span>
           ${citiesArray.map(c => `<a href="/city.html?id=${c.id}" class="${c.id === city.id ? 'active' : ''}">${c.name}</a>`).join('')}
+          <span class="nav-separator" aria-hidden="true">|</span>
           ${plannerLink}
           <div class="nav-tools">
-            <a href="/admin.html" class="nav-tool-btn" title="Administración">⚙️</a>
+            <a href="/admin.html" class="nav-tool-btn" title="Administraci&oacute;n">&#x2699;&#xFE0F;</a>
           </div>
         </div>
         <div class="nav-mobile-tools">
-          <a href="/admin.html" class="nav-tool-btn" title="Admin">⚙️</a>
-          <button class="nav-mobile-toggle" id="mobile-toggle">${icons.menu}</button>
+          <a href="/admin.html" class="nav-tool-btn" title="Admin">&#x2699;&#xFE0F;</a>
+          ${renderMobileMenu('mobile-toggle', 'mobile-menu', `
+            <a href="/">Inicio</a>
+            ${citiesArray.map(c => `<a href="/city.html?id=${c.id}" class="${c.id === city.id ? 'active' : ''}">${c.name} ${c.nameJa || ''}</a>`).join('')}
+            ${plannerLink}
+          `)}
         </div>
-      </div>
-      <div class="nav-mobile-menu" id="mobile-menu">
-        <a href="/">Inicio</a>
-        ${citiesArray.map(c => `<a href="/city.html?id=${c.id}">${c.name} ${c.nameJa || ''}</a>`).join('')}
-        ${plannerLink}
       </div>
     </nav>`;
   }
@@ -206,7 +272,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <div class="city-hero-content">
         <a href="/" class="back-link" style="color:rgba(255,255,255,0.8);">${icons.arrowLeft} Volver al inicio</a>
         <h1>${city.name}</h1>
-        <p class="city-ja">${city.nameJa} — ${city.tagline}</p>
+        <p class="city-ja">${city.nameJa} &mdash; ${city.tagline}</p>
         <p class="city-hero-desc">${city.description}</p>
       </div>
     </div>`;
@@ -214,22 +280,27 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
 
   function renderSummary(city, allPlaces, mustSeeCount) {
     return `<div class="city-summary">
-      <div class="summary-card"><div class="summary-card-icon">🎯</div><h4>Experiencia</h4><p>${city.summary}</p></div>
-      <div class="summary-card"><div class="summary-card-icon">👥</div><h4>Ideal para</h4><p>${city.idealFor}</p></div>
-      <div class="summary-card"><div class="summary-card-icon">📊</div><h4>En números</h4><p>${allPlaces.length} lugares · ${mustSeeCount} imprescindibles · ${city.zones.length} zonas · ${city.recommendedDays} recomendados</p></div>
+      <div class="summary-card"><div class="summary-card-icon">&#x1F3AF;</div><h4>Experiencia</h4><p>${city.summary}</p></div>
+      <div class="summary-card"><div class="summary-card-icon">&#x1F465;</div><h4>Ideal para</h4><p>${city.idealFor}</p></div>
+      <div class="summary-card"><div class="summary-card-icon">&#x1F4CA;</div><h4>En n&uacute;meros</h4><p>${allPlaces.length} lugares &middot; ${mustSeeCount} imprescindibles &middot; ${city.zones.length} zonas &middot; ${city.recommendedDays} recomendados</p></div>
     </div>`;
   }
 
   function renderCategoryFilters() {
-    return categories
-      .filter(c => places.some(p => p.category === c.id))
-      .map(c => `<button class="filter-pill ${state.category === c.id ? 'active' : ''}" data-category="${c.id}"><span class="icon">${c.icon}</span> ${c.label}</button>`)
-      .join('');
+    return `<select class="zone-select" id="category-select">
+      <option value="">Todas las categor&iacute;as</option>
+      ${categories
+        .filter(c => places.some(p => p.category === c.id))
+        .map(c => `<option value="${c.id}" ${state.category === c.id ? 'selected' : ''}>${c.icon} ${c.label}</option>`)
+        .join('')}
+    </select>`;
   }
 
-  function renderPriorityFilters() {
+  function renderPriorityFilters(iconOnly = false) {
     return Object.entries(priorityLabels)
-      .map(([key, val]) => `<button class="filter-pill ${state.priority === key ? 'active' : ''}" data-priority="${key}"><span class="icon">${val.icon}</span> ${val.label}</button>`)
+      .map(([key, val]) => iconOnly
+        ? `<button class="filter-pill filter-pill-icon-only ${state.priority === key ? 'active' : ''}" data-priority="${key}" title="${val.label}" aria-label="${val.label}"><span class="icon">${val.icon}</span></button>`
+        : `<button class="filter-pill ${state.priority === key ? 'active' : ''}" data-priority="${key}"><span class="icon">${val.icon}</span> ${val.label}</button>`)
       .join('');
   }
 
@@ -237,21 +308,21 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     const item = getPlannerItem(placeId);
     const status = item.status || 'none';
     let label = 'Sin asignar';
-    let icon = '➕';
+    let icon = '&#x2795;';
     let style = 'background:var(--bg-secondary); color:var(--text-primary); border-color:var(--border);';
     
     if (status === 'in-tray') {
-      label = 'En bandeja'; icon = '📍'; style = 'background:#fef3c7; color:#b45309; border-color:#fde68a;';
+      label = 'En bandeja'; icon = '&#x1F4E5;'; style = 'background:#fef3c7; color:#b45309; border-color:#fde68a;';
     } else if (status === 'planned') {
-      label = `Día ${item.assignedDay || 1}`; icon = '🗓️'; style = 'background:#e0e7ff; color:#4338ca; border-color:#c7d2fe;';
+      label = `D&iacute;a ${item.assignedDay || 1}`; icon = '&#x1F5D3;&#xFE0F;'; style = 'background:#e0e7ff; color:#4338ca; border-color:#c7d2fe;';
     } else if (status === 'done') {
-      label = 'Realizada'; icon = '✅'; style = 'background:#dcfce7; color:#15803d; border-color:#bbf7d0;';
+      label = 'Realizada'; icon = '&#x2705;'; style = 'background:#dcfce7; color:#15803d; border-color:#bbf7d0;';
     } else if (status === 'discarded') {
-      label = 'Descartada'; icon = '❌'; style = 'background:#f3f4f6; color:#9ca3af; border-color:#e5e7eb;';
+      label = 'Descartada'; icon = '&#x274C;'; style = 'background:#f3f4f6; color:#9ca3af; border-color:#e5e7eb;';
     }
 
     const dayOptions = Array.from({length: totalTripDays}, (_, i) => i + 1)
-      .map(d => `<option value="${d}" ${item.assignedDay == d ? 'selected' : ''}>Día ${d}</option>`).join('');
+      .map(d => `<option value="${d}" ${item.assignedDay == d ? 'selected' : ''}>D&iacute;a ${d}</option>`).join('');
 
     return `
       <div class="planner-chip-container">
@@ -259,15 +330,15 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
           ${icon} ${label}
         </div>
         <div class="planner-chip-dropdown">
-          <button class="planner-dropdown-btn" data-action="in-tray" data-id="${placeId}">📍 Bandeja</button>
+          <button class="planner-dropdown-btn" data-action="in-tray" data-id="${placeId}">&#x1F4E5; Bandeja</button>
           <div class="planner-day-selector">
             <select class="planner-day-select" data-id="${placeId}">
-              <option value="" disabled selected>🗓️ Asignar Día...</option>
+              <option value="" disabled selected>&#x1F5D3;&#xFE0F; Asignar d&iacute;a...</option>
               ${dayOptions}
             </select>
           </div>
-          <button class="planner-dropdown-btn" data-action="done" data-id="${placeId}">✅ Realizada</button>
-          <button class="planner-dropdown-btn" data-action="discarded" data-id="${placeId}">❌ Descartar</button>
+          <button class="planner-dropdown-btn" data-action="done" data-id="${placeId}">&#x2705; Realizada</button>
+          <button class="planner-dropdown-btn" data-action="discarded" data-id="${placeId}">&#x274C; Descartar</button>
         </div>
       </div>
     `;
@@ -303,7 +374,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <div class="place-card-header">
         <div>
           <div class="place-card-title">${place.name}</div>
-          <div class="place-card-category"><span class="icon">${cat?.icon || '📍'}</span> ${place.type}</div>
+          <div class="place-card-category"><span class="icon">${cat?.icon || '&#x1F4CD;'}</span> ${place.type}</div>
         </div>
         ${getPlannerChipUI(place.id)}
       </div>
@@ -311,9 +382,9 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <div class="place-card-meta">
         <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
         <span class="place-card-zone">${place.zone}</span>
-        ${place.estimatedDuration ? `<span class="place-card-duration">🕐 ${place.estimatedDuration}</span>` : ''}
+        ${place.estimatedDuration ? `<span class="place-card-duration"><span class="place-card-duration-icon">${icons.clock}</span><span class="place-card-duration-text">${place.estimatedDuration}</span></span>` : ''}
         <div style="margin-left:auto; display:flex; align-items:center; gap:6px;" onclick="event.stopPropagation()">
-          ${scoreText ? `<span style="font-size:0.85rem; font-weight:bold; color:var(--text-secondary); margin-right:2px;">⭐ ${scoreText}</span>` : ''}
+          ${scoreText ? `<span style="font-size:0.85rem; font-weight:bold; color:var(--text-secondary); margin-right:2px;">&#x2B50; ${scoreText}</span>` : ''}
           ${getUmbrellaSVG(place.rainyFriendly, false, place.id)}
           <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#f1f5f9; color:#3b82f6; transition:all 0.2s;" onmouseover="this.style.background='#e2e8f0'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='#f1f5f9'; this.style.transform='scale(1)';">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
@@ -332,42 +403,196 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <div class="modal-header">
         <div>
           <h2 style="margin-bottom:4px;">${place.name}</h2>
-          <div class="place-card-category" style="margin:0;"><span class="icon">${cat?.icon||'📍'}</span> ${place.type} · ${place.zone}</div>
+          <div class="place-card-category" style="margin:0;"><span class="icon">${cat?.icon||'&#x1F4CD;'}</span> ${place.type} &middot; ${place.zone}</div>
         </div>
-        <button class="modal-close" id="modal-close">✕</button>
+        <button class="modal-close" id="modal-close">&#x2715;</button>
       </div>
       <div class="modal-body">
-        <div class="modal-badges" style="margin-bottom:15px; display:flex; gap:10px;">
-          ${getPlannerChipUI(place.id)}
-        </div>
-        <div class="modal-badges">
-          <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
-          ${place.requiresTicket ? `<span class="priority-badge" style="background:#eff6ff;color:#2563eb;">🎫 Requiere entrada</span>` : ''}
-          <div style="margin-left:auto; display:flex; align-items:center; gap:6px;">
-            ${getUmbrellaSVG(place.rainyFriendly, true, place.id)}
-            <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:#f1f5f9; color:#3b82f6; transition:all 0.2s;" onmouseover="this.style.background='#e2e8f0'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='#f1f5f9'; this.style.transform='scale(1)';">
-              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-            </a>
+        <div class="modal-toolbar">
+          <div class="modal-toolbar-row">
+            <div class="modal-badges modal-badges-inline">
+              ${getPlannerChipUI(place.id)}
+              <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
+              ${place.requiresTicket ? `<span class="priority-badge" style="background:#eff6ff;color:#2563eb;">&#x1F3AB; Requiere entrada</span>` : ''}
+              ${getUmbrellaSVG(place.rainyFriendly, true, place.id)}
+              <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" class="modal-inline-icon-btn">
+                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+              </a>
+            </div>
+            <button type="button" id="edit-place-btn" class="filter-pill modal-edit-btn" style="border:1px solid var(--border); background:var(--bg-secondary);">&#x270F;&#xFE0F; Editar actividad</button>
           </div>
         </div>
-        <div class="modal-section"><div class="modal-section-title">Descripción</div><p style="line-height:1.7;">${place.description}</p></div>
-        ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos prácticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
-        <div class="modal-section"><div class="modal-section-title">Información útil</div>
+        <div class="modal-section"><div class="modal-section-title">Descripci&oacute;n</div><p style="line-height:1.7;">${place.description}</p></div>
+        ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos pr&aacute;cticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
+        <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
         <div class="modal-info-grid">
-          <div class="modal-info-item"><span class="modal-info-label">⏱️ Duración estimada</span><span class="modal-info-value">${place.estimatedDuration || 'Pendiente'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">☀️ Mejor momento</span><span class="modal-info-value">${place.bestTime || 'Cualquier momento'}</span></div>
-          ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">⭐ Puntuación</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
-          ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">🎫 Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
+          <div class="modal-info-item"><span class="modal-info-label">&#x23F1;&#xFE0F; Duraci&oacute;n estimada</span><span class="modal-info-value">${place.estimatedDuration || 'Pendiente'}</span></div>
+          <div class="modal-info-item"><span class="modal-info-label">${getTimeIcon(place.bestTime)} Mejor momento</span><span class="modal-info-value">${formatBestTimeLabel(place.bestTime)}</span></div>
+          ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">&#x2B50; Puntuaci&oacute;n</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
+          ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">&#x1F3AB; Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
         </div></div>
         ${place.comment ? `<div class="modal-section"><div class="modal-section-title">Nota personal</div><div class="modal-comment">"${place.comment}"</div></div>` : ''}
-        ${place.address ? `<div class="modal-section"><div class="modal-section-title">Dirección</div><div class="modal-address">${icons.mapPin} <a href="https://www.google.com/maps/search/${encodeURIComponent(place.address).replace(/%20/g, '+')}" target="_blank" class="address-link">${place.address}</a></div></div>` : ''}
+        ${place.address ? `<div class="modal-section"><div class="modal-section-title">Direcci&oacute;n</div><div class="modal-address">${icons.mapPin} <a href="https://www.google.com/maps/search/${encodeURIComponent(place.address).replace(/%20/g, '+')}" target="_blank" class="address-link">${place.address}</a></div></div>` : ''}
         
         <div class="modal-section">
-          <div class="modal-section-title">Ubicación</div>
+          <div class="modal-section-title">Ubicaci&oacute;n</div>
           <div id="modal-map-${place.id}" class="modal-map"></div>
-          <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" class="maps-link-btn" style="width:100%;text-align:center;justify-content:center;padding:12px;margin-top:12px;">📍 Abrir en Google Maps (Navegar)</a>
+          <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" class="maps-link-btn" style="width:100%;text-align:center;justify-content:center;padding:12px;margin-top:12px;">&#x1F4CD; Abrir en Google Maps (Navegar)</a>
         </div>
       </div>`;
+  }
+
+
+  function renderPlaceForm(place = null) {
+    const isEdit = Boolean(place);
+    const formPlace = place || {
+      id: buildAutoPlaceId(''),
+      cityId: cityMeta.id,
+      name: '',
+      category: categories[0]?.id || '',
+      type: '',
+      priority: 'optional',
+      zone: cityMeta.zones?.[0] || '',
+      description: '',
+      address: '',
+      lat: '',
+      lng: '',
+      estimatedDuration: '',
+      bestTime: 'cualquier-momento',
+      rainyFriendly: false,
+      score: '',
+      requiresTicket: false,
+      ticketInfo: '',
+      tips: '',
+      comment: ''
+    };
+
+    const latValue = formPlace.lat ?? formPlace.coordinates?.lat ?? '';
+    const lngValue = formPlace.lng ?? formPlace.coordinates?.lng ?? '';
+    const generatedId = isEdit ? formPlace.id : buildAutoPlaceId(formPlace.name, formPlace.id);
+
+    return `<div class="modal-handle"></div>
+      <div class="modal-header">
+        <div>
+          <h2 style="margin-bottom:4px;">${isEdit ? 'Editar actividad' : 'Nueva actividad'}</h2>
+          <div class="place-card-category" style="margin:0;">${cityMeta.name}</div>
+        </div>
+        <button class="modal-close" id="modal-close-form">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <form id="place-form" class="admin-form" data-editing-id="${isEdit ? formPlace.id : ''}">
+          <p class="city-form-help">Los campos marcados con <strong>*</strong> son obligatorios. El ID se genera autom&aacute;ticamente en formato seguro, sin acentos ni caracteres especiales.</p>
+          <input type="hidden" id="place-form-id" value="${generatedId}">
+          <div class="form-group"><label>Ciudad</label><input type="text" value="${cityMeta.name}" readonly style="background:#eee; cursor:not-allowed;"><input type="hidden" id="place-form-city-id" value="${cityMeta.id}"></div>
+          <div class="form-group"><label>Nombre *</label><input type="text" id="place-form-name" value="${formPlace.name || ''}" required placeholder="Ej: Templo Senso-ji"></div>
+          <div class="form-group"><label>Categor&iacute;a *</label><select id="place-form-category" required>${categories.map((category) => `<option value="${category.id}" ${formPlace.category === category.id ? 'selected' : ''}>${category.label}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Tipo *</label><input type="text" id="place-form-type" value="${formPlace.type || ''}" required placeholder="Ej: Templo, mirador, museo"></div>
+          <div class="form-group"><label>Prioridad *</label><select id="place-form-priority" required>${Object.entries(priorityLabels).map(([value, config]) => `<option value="${value}" ${formPlace.priority === value ? 'selected' : ''}>${config.label}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Zona *</label><input type="text" id="place-form-zone" value="${formPlace.zone || ''}" required placeholder="Ej: Asakusa"></div>
+          <div class="form-group"><label>Descripci&oacute;n *</label><textarea id="place-form-description" rows="3" required placeholder="Ej: Templo budista hist&oacute;rico con gran pagoda y acceso f&aacute;cil desde la estaci&oacute;n.">${formPlace.description || ''}</textarea></div>
+          <div class="form-group"><label>Direcci&oacute;n</label><input type="text" id="place-form-address" value="${formPlace.address || ''}" placeholder="Ej: 2-3-1 Asakusa, Taito City, Tokyo"></div>
+          <div class="form-group" style="display:flex; gap:10px;"><div style="flex:1;"><label>Latitud</label><input type="number" id="place-form-lat" value="${latValue}" step="any"></div><div style="flex:1;"><label>Longitud</label><input type="number" id="place-form-lng" value="${lngValue}" step="any"></div></div>
+          <div class="form-group" style="display:flex; gap:10px;"><div style="flex:1;"><label>Duraci&oacute;n estimada</label><input type="text" id="place-form-duration" value="${formPlace.estimatedDuration || ''}" placeholder="Ej: 1 h 30 min"></div><div style="flex:1;"><label>Mejor momento</label><select id="place-form-best-time">${BEST_TIME_OPTIONS.map((option) => `<option value="${option.value}" ${option.value === (formPlace.bestTime || 'cualquier-momento') ? 'selected' : ''}>${option.label}</option>`).join('')}</select></div></div>
+          <div class="form-group" style="display:flex; gap:18px; flex-wrap:wrap;"><label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="place-form-rainy" ${formPlace.rainyFriendly ? 'checked' : ''}> Apto para lluvia</label><label style="display:flex; align-items:center; gap:8px; margin:0;"><input type="checkbox" id="place-form-ticket" ${formPlace.requiresTicket ? 'checked' : ''}> Requiere entrada</label></div>
+          <div class="form-group"><label>Puntuaci&oacute;n</label><input type="number" id="place-form-score" value="${formPlace.score ?? ''}" min="1" max="10" step="0.1" placeholder="Ej: 8.7"><small class="city-form-hint">Rango permitido: de 1 a 10. D&eacute;jalo vac&iacute;o si todav&iacute;a no la quieres puntuar.</small></div>
+          <div class="form-group"><label>Informaci&oacute;n de entrada</label><input type="text" id="place-form-ticket-info" value="${formPlace.ticketInfo || ''}" placeholder="Ej: Gratuita / 12 € / reserva previa"></div>
+          <div class="form-group"><label>Consejos</label><textarea id="place-form-tips" rows="2" placeholder="Ej: Mejor llegar antes de las 9:00 para evitar colas.">${formPlace.tips || ''}</textarea></div>
+          <div class="form-group"><label>Comentario</label><textarea id="place-form-comment" rows="2" placeholder="Ej: Ideal para combinar con una ruta por el barrio.">${formPlace.comment || ''}</textarea></div>
+          <p id="place-form-error" style="display:none; color:#dc2626; font-weight:600; margin-bottom:12px;"></p>
+          <button type="submit" class="maps-link-btn" style="width:100%; justify-content:center;">${isEdit ? 'Guardar cambios' : 'Crear actividad'}</button>
+        </form>
+      </div>`;
+  }
+
+  function openPlaceForm(place = null) {
+    const overlay = document.getElementById('modal-overlay');
+    const modal = document.getElementById('modal');
+    if (!overlay || !modal) return;
+    modal.innerHTML = renderPlaceForm(place);
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('modal-close-form')?.addEventListener('click', closeModal);
+    const nameInput = document.getElementById('place-form-name');
+    const idInput = document.getElementById('place-form-id');
+    if (!place && nameInput && idInput) {
+      const syncId = () => {
+        idInput.value = buildAutoPlaceId(nameInput.value);
+      };
+      syncId();
+      nameInput.addEventListener('input', syncId);
+    }
+    document.getElementById('place-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const editingId = event.currentTarget.dataset.editingId || null;
+      const id = document.getElementById('place-form-id').value.trim().toLowerCase();
+      const latRaw = document.getElementById('place-form-lat').value.trim();
+      const lngRaw = document.getElementById('place-form-lng').value.trim();
+      const scoreRaw = document.getElementById('place-form-score').value.trim();
+      const errorEl = document.getElementById('place-form-error');
+
+      if (!id) {
+        errorEl.textContent = 'El ID es obligatorio.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      if (!editingId && places.some((entry) => entry.id === id)) {
+        errorEl.textContent = 'Ya existe una actividad con este ID.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      if ((latRaw && !lngRaw) || (!latRaw && lngRaw)) {
+        errorEl.textContent = 'Latitud y longitud deben informarse juntas o dejarse vacías.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      let parsedScore = null;
+      if (scoreRaw) {
+        parsedScore = Number.parseFloat(scoreRaw.replace(',', '.'));
+        if (!Number.isFinite(parsedScore) || parsedScore < 1 || parsedScore > 10) {
+          errorEl.textContent = 'La puntuación debe estar entre 1 y 10.';
+          errorEl.style.display = 'block';
+          return;
+        }
+      }
+
+      const draft = normalizePlaceRecord({
+        ...(place || {}),
+        id,
+        cityId: cityMeta.id,
+        name: document.getElementById('place-form-name').value.trim(),
+        category: document.getElementById('place-form-category').value,
+        type: document.getElementById('place-form-type').value.trim(),
+        priority: document.getElementById('place-form-priority').value,
+        zone: document.getElementById('place-form-zone').value.trim(),
+        description: document.getElementById('place-form-description').value.trim(),
+        address: document.getElementById('place-form-address').value.trim(),
+        lat: latRaw,
+        lng: lngRaw,
+        estimatedDuration: document.getElementById('place-form-duration').value.trim(),
+        bestTime: document.getElementById('place-form-best-time').value,
+        rainyFriendly: document.getElementById('place-form-rainy').checked,
+        score: parsedScore,
+        requiresTicket: document.getElementById('place-form-ticket').checked,
+        ticketInfo: document.getElementById('place-form-ticket-info').value.trim(),
+        tips: document.getElementById('place-form-tips').value.trim(),
+        comment: document.getElementById('place-form-comment').value.trim()
+      });
+
+      await putAll('places', [draft]);
+
+      if (editingId) {
+        const index = places.findIndex((entry) => entry.id === editingId);
+        if (index !== -1) places[index] = draft;
+      } else {
+        places.push(draft);
+      }
+
+      closeModal();
+      render();
+    });
   }
 
   function renderItineraries(city, allPlaces) {
@@ -375,9 +600,9 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     if (!itineraries.length) return '';
     return `<section class="section-sm" style="background:var(--bg-secondary);">
       <div class="container">
-        <div class="home-section-title"><h2>📋 Itinerarios sugeridos</h2><p>Propuesta de rutas por zonas para optimizar el tiempo</p></div>
+        <div class="home-section-title"><h2>&#x1F4CB; Itinerarios sugeridos</h2><p>Propuesta de rutas por zonas para optimizar el tiempo</p></div>
         ${itineraries.map(it => `<div class="itinerary-block">
-          <div class="itinerary-day"><span class="number" style="background:${cityColor};">${it.day}</span> Día ${it.day}: ${it.zone}</div>
+          <div class="itinerary-day"><span class="number" style="background:${cityColor};">${it.day}</span> D&iacute;a ${it.day}: ${it.zone}</div>
           <div class="itinerary-zone">${it.description}</div>
           <div class="itinerary-places">${it.places.map(p => `<div class="itinerary-place"><span class="dot" style="background:${cityColor};"></span><span class="time">${p.time}</span><span class="name">${p.name}</span></div>`).join('')}</div>
         </div>`).join('')}
@@ -395,29 +620,14 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       return {
         day: i + 1,
         zone,
-        description: `Explora los principales puntos de interés de ${zone}`,
+        description: `Explora los principales puntos de inter&eacute;s de ${zone}`,
         places: zonePlaces.map((p, j) => ({ name: p.name, time: times[j] || '17:00' }))
       };
     });
   }
 
-  function renderTips(city) {
-    const tips = [
-      { icon: '🚃', title: 'Transporte', text: `Usa el transporte público. En ${city.name} es eficiente y puntual. Consigue un IC Card (Suica/ICOCA) para mayor comodidad.` },
-      { icon: '🗾', title: 'Idioma', text: 'Google Translate con cámara es muy útil para menús y carteles. La app es imprescindible.' },
-      { icon: '💴', title: 'Efectivo', text: 'Japón sigue usando mucho efectivo. Lleva siempre yenes encima, especialmente para templos y mercados.' },
-      { icon: '🏮', title: 'Costumbres', text: 'Quítate los zapatos al entrar a templos y algunos restaurantes. No des propina. Sé respetuoso en los santuarios.' },
-      { icon: '📱', title: 'Conectividad', text: 'Alquila un pocket WiFi o compra una eSIM para tener internet durante todo el viaje.' },
-      { icon: '🌡️', title: 'Clima en julio', text: 'Julio es caluroso y húmedo en Japón (30-35°C). Lleva ropa ligera, protección solar y mantente hidratado.' }
-    ];
-    return `<section class="section-sm"><div class="container">
-      <div class="home-section-title"><h2>💡 Consejos prácticos</h2><p>Información útil para moverte por ${city.name}</p></div>
-      <div class="tips-grid">${tips.map(t => `<div class="tip-card"><div class="tip-card-icon">${t.icon}</div><h4>${t.title}</h4><p>${t.text}</p></div>`).join('')}</div>
-    </div></section>`;
-  }
-
   function renderFooter() {
-    return `<footer class="footer"><div class="container"><p>Japón 2026 · ${datesFormatted} · Hecho con <span class="heart">❤️</span></p></div></footer>`;
+    return `<footer class="footer"><div class="container"><p>Jap&oacute;n 2026 &middot; ${datesFormatted} &middot; Hecho con <span class="heart">&#x2764;&#xFE0F;</span></p></div></footer>`;
   }
 
   function hasActiveFilters() {
@@ -429,14 +639,18 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
       searchInput.addEventListener('input', debounce(e => { state.search = e.target.value; render(); }, 200));
-      searchInput.focus && setTimeout(() => { searchInput.selectionStart = searchInput.value.length; }, 0);
     }
-    document.getElementById('search-clear')?.addEventListener('click', () => { state.search = ''; render(); });
-
-    // Category filters
-    document.querySelectorAll('[data-category]').forEach(btn => {
-      btn.addEventListener('click', () => { state.category = state.category === btn.dataset.category ? '' : btn.dataset.category; render(); });
+    document.getElementById('btn-create-place')?.addEventListener('click', () => openPlaceForm());
+    document.getElementById('search-clear')?.addEventListener('click', () => {
+      state.search = '';
+      render();
+      requestAnimationFrame(() => {
+        document.getElementById('search-input')?.focus({ preventScroll: true });
+      });
     });
+
+    // Category select
+    document.getElementById('category-select')?.addEventListener('change', e => { state.category = e.target.value; render(); });
 
     // Priority filters
     document.querySelectorAll('[data-priority]').forEach(btn => {
@@ -466,7 +680,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       render();
     });
 
-    // Place card click → modal
+    // Place card click -> modal
     document.querySelectorAll('.place-card').forEach(card => {
       card.addEventListener('click', (e) => {
         if (e.target.closest('.planner-chip-container')) return; // Ignore clicks on the planner chip
@@ -478,10 +692,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     // Modal close
     document.getElementById('modal-overlay')?.addEventListener('click', e => { if (e.target.id === 'modal-overlay') closeModal(); });
 
-    // Mobile menu toggle
-    document.getElementById('mobile-toggle')?.addEventListener('click', () => {
-      document.getElementById('mobile-menu')?.classList.toggle('open');
-    });
+    bindMobileNav('mobile-toggle', 'mobile-menu');
 
     // Back to top
     const backToTop = document.getElementById('back-to-top');
@@ -533,6 +744,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     document.body.style.overflow = 'hidden';
     
     modal.querySelector('#modal-close')?.addEventListener('click', closeModal);
+    modal.querySelector('#edit-place-btn')?.addEventListener('click', () => openPlaceForm(place));
 
     // Render minimap
     setTimeout(() => {
@@ -600,7 +812,7 @@ async function boot() {
 
   const allPlaces = await getAll('places');
   const places = allPlaces.filter(p => p.cityId === cityId);
-  const citiesArray = await getAll('cities');
+  const citiesArray = sortCities(await getAll('cities'));
   const plannerItems = await getAll('planner');
   
   const settingsArray = await getAll('settings') || [];
@@ -612,3 +824,4 @@ async function boot() {
 }
 
 boot();
+

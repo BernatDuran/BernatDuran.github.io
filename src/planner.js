@@ -1,11 +1,14 @@
-import './styles/main.css';
+﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import { getAll, putAll } from './utils/db.js';
 import { categories, priorityLabels } from './data/cities.js';
-import { icons, formatScore } from './utils/helpers.js';
+import { icons, formatScore, debounce } from './utils/helpers.js';
 import { registerSW } from 'virtual:pwa-register';
 import Sortable from 'sortablejs';
+import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
+import { sortCities } from './utils/cityData.js';
+import { formatBestTimeLabel } from './utils/placeData.js';
 
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
@@ -22,6 +25,7 @@ let _totalTripDays = 7;
 let _citiesArray = [];
 let _viewMode = 'calendar';
 let _selectedMapScope = 'all';
+let _plannerFilterState = { search: '', cityId: '', priority: '' };
 
 let _dropdownPortal = null;
 let _dropdownPlaceId = null;
@@ -30,6 +34,35 @@ let _plannerMap = null;
 let _toastPortal = null;
 let _toastHideTimer = null;
 let _toastRemoveTimer = null;
+
+function captureInputFocusState() {
+  const activeElement = document.activeElement;
+  if (!(activeElement instanceof HTMLInputElement) && !(activeElement instanceof HTMLTextAreaElement)) {
+    return null;
+  }
+
+  if (!activeElement.id) return null;
+
+  return {
+    id: activeElement.id,
+    selectionStart: activeElement.selectionStart,
+    selectionEnd: activeElement.selectionEnd
+  };
+}
+
+function restoreInputFocusState(focusState) {
+  if (!focusState?.id) return;
+
+  requestAnimationFrame(() => {
+    const input = document.getElementById(focusState.id);
+    if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLTextAreaElement)) return;
+
+    input.focus({ preventScroll: true });
+    if (typeof focusState.selectionStart === 'number' && typeof focusState.selectionEnd === 'number') {
+      input.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+    }
+  });
+}
 
 function destroyPlannerMap() {
   if (_plannerMap) {
@@ -259,13 +292,43 @@ function getRecommendedMapScope(groups) {
   return 'all';
 }
 
-function buildGroupedData() {
+function getFilteredPlannerPlaces() {
+  const searchQuery = _plannerFilterState.search.trim().toLowerCase();
+
+  return _places.filter((place) => {
+    if (_plannerFilterState.cityId && place.cityId !== _plannerFilterState.cityId) return false;
+    if (_plannerFilterState.priority && place.priority !== _plannerFilterState.priority) return false;
+
+    if (searchQuery) {
+      const category = categories.find((entry) => entry.id === place.category);
+      const cityName = getCityName(place.cityId);
+      const haystack = [
+        place.name,
+        place.description,
+        place.zone,
+        place.type,
+        category?.label,
+        cityName
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      if (!haystack.includes(searchQuery)) return false;
+    }
+
+    return true;
+  });
+}
+
+function hasActivePlannerFilters() {
+  return Boolean(_plannerFilterState.search || _plannerFilterState.cityId || _plannerFilterState.priority);
+}
+
+function buildGroupedData(filteredPlaces = _places) {
   const groups = { tray: [], unassigned: [] };
   for (let day = 1; day <= _totalTripDays; day += 1) {
     groups[day] = [];
   }
 
-  _places.forEach((place) => {
+  filteredPlaces.forEach((place) => {
     const item = _plannerItems.find((p) => p.placeId === place.id) || {};
 
     if (item.status === 'in-tray') {
@@ -285,6 +348,41 @@ function buildGroupedData() {
   }
 
   return groups;
+}
+
+function renderPlannerPriorityFilters(iconOnly = false) {
+  return Object.entries(priorityLabels)
+    .map(([key, val]) => iconOnly
+      ? `<button class="filter-pill filter-pill-icon-only ${_plannerFilterState.priority === key ? 'active' : ''}" data-planner-priority="${key}" title="${val.label}" aria-label="${val.label}"><span class="icon">${val.icon}</span></button>`
+      : `<button class="filter-pill ${_plannerFilterState.priority === key ? 'active' : ''}" data-planner-priority="${key}"><span class="icon">${val.icon}</span> ${val.label}</button>`)
+    .join('');
+}
+
+function renderPlannerFilters(filteredCount) {
+  return `
+    <div class="filters-section" id="planner-filters-section">
+      <div class="filters-inner planner-filters-wrap">
+        <div class="filters-row filters-row-search">
+          <div class="search-bar-container" style="flex:1;max-width:420px;">
+            <span class="search-bar-icon">${icons.search}</span>
+            <input type="text" class="search-bar" id="planner-search-input" placeholder="Buscar actividad, zona o ciudad..." value="${escapeHtml(_plannerFilterState.search)}">
+            <button class="search-clear ${_plannerFilterState.search ? 'visible' : ''}" id="planner-search-clear">&#x2715;</button>
+          </div>
+          <div class="filters-inline-actions">
+            ${renderPlannerPriorityFilters(true)}
+            ${hasActivePlannerFilters() ? `<button class="clear-filters" id="planner-clear-filters">Limpiar filtros</button>` : ''}
+          </div>
+          <span class="results-count">${filteredCount} actividades visibles</span>
+        </div>
+        <div class="filters-row filters-row-controls">
+          <select class="zone-select" id="planner-city-filter">
+            <option value="">Todas las ciudades</option>
+            ${_citiesArray.map((city) => `<option value="${city.id}" ${_plannerFilterState.cityId === city.id ? 'selected' : ''}>${city.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function buildMapModel(scope, groups) {
@@ -395,7 +493,7 @@ function renderModal(place) {
       <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
         <div class="modal-info-grid">
           <div class="modal-info-item"><span class="modal-info-label">&#x23F1;&#xFE0F; Duraci&oacute;n</span><span class="modal-info-value">${place.estimatedDuration || '&mdash;'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">&#x2600;&#xFE0F; Mejor momento</span><span class="modal-info-value">${place.bestTime || 'Cualquier momento'}</span></div>
+          <div class="modal-info-item"><span class="modal-info-label">&#x2600;&#xFE0F; Mejor momento</span><span class="modal-info-value">${formatBestTimeLabel(place.bestTime)}</span></div>
           ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">&#x2B50; Puntuaci&oacute;n</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
           ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">&#x1F3AB; Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
         </div>
@@ -497,7 +595,9 @@ function buildNav(plannerLink) {
         <a href="/" class="nav-logo">&#x1F1EF;&#x1F1F5; Jap&oacute;n 2026 <span class="ja">&#26085;&#26412;</span></a>
         <div class="nav-links">
           <a href="/">Inicio</a>
+          <span class="nav-separator" aria-hidden="true">|</span>
           ${_citiesArray.map((c) => `<a href="/city.html?id=${c.id}">${c.name}</a>`).join('')}
+          <span class="nav-separator" aria-hidden="true">|</span>
           ${plannerLink}
           <div class="nav-tools">
             <a href="/admin.html" class="nav-tool-btn" title="Admin">&#x2699;&#xFE0F;</a>
@@ -505,22 +605,23 @@ function buildNav(plannerLink) {
         </div>
         <div class="nav-mobile-tools">
           <a href="/admin.html" class="nav-tool-btn">&#x2699;&#xFE0F;</a>
-          <button class="nav-mobile-toggle" id="mobile-toggle">${icons.menu}</button>
+          ${renderMobileMenu('mobile-toggle', 'mobile-menu', `
+            <a href="/">Inicio</a>
+            ${_citiesArray.map((c) => `<a href="/city.html?id=${c.id}">${c.name}</a>`).join('')}
+            ${plannerLink}
+          `)}
         </div>
-      </div>
-      <div class="nav-mobile-menu" id="mobile-menu">
-        <a href="/">Inicio</a>
-        ${_citiesArray.map((c) => `<a href="/city.html?id=${c.id}">${c.name}</a>`).join('')}
-        ${plannerLink}
       </div>
     </nav>
   `;
 }
 
 function renderPlannerPage() {
+  const focusState = captureInputFocusState();
   destroyPlannerMap();
 
-  const groups = buildGroupedData();
+  const filteredPlaces = getFilteredPlannerPlaces();
+  const groups = buildGroupedData(filteredPlaces);
   const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
   const trayCount = groups.tray.length + groups.unassigned.length;
   const plannedCount = Array.from({ length: _totalTripDays }, (_, i) => i + 1)
@@ -586,6 +687,8 @@ function renderPlannerPage() {
       </div>
     </div>
 
+    ${renderPlannerFilters(filteredPlaces.length)}
+
     ${_viewMode === 'calendar' ? calendarLayout : renderMapPanel(mapModel)}
 
     <div class="modal-overlay" id="planner-modal-overlay">
@@ -593,9 +696,9 @@ function renderPlannerPage() {
     </div>
   `;
 
-  document.getElementById('mobile-toggle')?.addEventListener('click', () => {
-    document.getElementById('mobile-menu')?.classList.toggle('open');
-  });
+  bindMobileNav('mobile-toggle', 'mobile-menu');
+  attachPlannerFilterEvents();
+  restoreInputFocusState(focusState);
 
   if (_viewMode === 'calendar') {
     initSortable();
@@ -627,10 +730,13 @@ function renderPlannerMap(model) {
 
     route.entries.forEach((entry) => {
       const cat = categories.find((c) => c.id === entry.place.category);
+      const prio = priorityLabels[entry.place.priority];
+      const scoreText = formatScore(entry.place.score);
+      const orderLabel = (entry.item?.order ?? 0) + 1;
       const iconHtml = `
         <div class="planner-route-marker" style="--route-color:${route.color};">
           <span class="planner-route-emoji">${cat?.icon || '&#x1F4CD;'}</span>
-          <span class="planner-route-day-badge">D${entry.day}</span>
+          <span class="planner-route-day-badge">D${entry.day} (#${orderLabel})</span>
         </div>
       `;
 
@@ -651,7 +757,12 @@ function renderPlannerMap(model) {
           </div>
           <div class="popup-meta">
             <span class="popup-type">D&iacute;a ${entry.day} &middot; ${escapeHtml(entry.place.type || '')}</span>
-            <span class="popup-priority" style="background:${route.color}; color:#fff;">Ruta D&iacute;a ${entry.day}</span>
+            <div class="planner-map-popup-details">
+              <span class="popup-priority" style="background:${route.color}; color:#fff;">Ruta D&iacute;a ${entry.day}</span>
+              ${prio ? `<span class="planner-map-popup-chip" title="${escapeHtml(prio.label)}">${prio.icon}</span>` : ''}
+              ${scoreText ? `<span class="planner-map-popup-chip">&#x2B50; ${scoreText}</span>` : ''}
+              ${entry.place.estimatedDuration ? `<span class="planner-map-popup-chip">${icons.clock} ${escapeHtml(entry.place.estimatedDuration)}</span>` : ''}
+            </div>
           </div>
           <button class="popup-btn planner-map-popup-btn" data-place-id="${entry.place.id}">Ver detalles</button>
         </div>
@@ -661,7 +772,7 @@ function renderPlannerMap(model) {
     if (latlngs.length >= 2) {
       L.polyline(latlngs, {
         color: route.color,
-        weight: 4,
+        weight: 3,
         opacity: model.scope === 'all' ? 0.7 : 0.85,
         lineJoin: 'round'
       }).addTo(_plannerMap);
@@ -677,6 +788,42 @@ function renderPlannerMap(model) {
   setTimeout(() => {
     _plannerMap?.invalidateSize({ pan: false });
   }, 0);
+}
+
+function attachPlannerFilterEvents() {
+  const searchInput = document.getElementById('planner-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', debounce((event) => {
+      _plannerFilterState.search = event.target.value;
+      renderPlannerPage();
+    }, 200));
+  }
+
+  document.getElementById('planner-search-clear')?.addEventListener('click', () => {
+    _plannerFilterState.search = '';
+    renderPlannerPage();
+    requestAnimationFrame(() => {
+      document.getElementById('planner-search-input')?.focus({ preventScroll: true });
+    });
+  });
+
+  document.getElementById('planner-city-filter')?.addEventListener('change', (event) => {
+    _plannerFilterState.cityId = event.target.value;
+    renderPlannerPage();
+  });
+
+  document.querySelectorAll('[data-planner-priority]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const value = button.dataset.plannerPriority;
+      _plannerFilterState.priority = _plannerFilterState.priority === value ? '' : value;
+      renderPlannerPage();
+    });
+  });
+
+  document.getElementById('planner-clear-filters')?.addEventListener('click', () => {
+    _plannerFilterState = { search: '', cityId: '', priority: '' };
+    renderPlannerPage();
+  });
 }
 
 function openPlaceModal(place) {
@@ -904,20 +1051,9 @@ async function boot() {
   const settingsArray = (await getAll('settings')) || [];
   _globalSettings = settingsArray.find((s) => s.id === 'global') || {};
 
-  if (!_globalSettings.plannerEnabled) {
-    app.innerHTML = `
-      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; gap:20px; text-align:center; padding:20px;">
-        <div style="font-size:4rem;">&#x1F5D3;&#xFE0F;</div>
-        <h2 style="font-family:'Outfit',sans-serif;">Planificador desactivado</h2>
-        <p style="color:var(--text-secondary);">Activa el m&oacute;dulo en <a href="/admin.html" style="color:var(--accent);">Administraci&oacute;n &rarr; Configuraci&oacute;n del Viaje</a> y guarda los ajustes.</p>
-        <a href="/" style="padding:10px 20px; background:var(--accent); color:white; border-radius:999px; font-weight:600; text-decoration:none;">Volver al Inicio</a>
-      </div>`;
-    return;
-  }
-
   _places = await getAll('places');
   _plannerItems = (await getAll('planner')) || [];
-  _citiesArray = await getAll('cities');
+  _citiesArray = sortCities(await getAll('cities'));
   _totalTripDays = calcTripDays(_globalSettings);
 
   const groups = buildGroupedData();
@@ -928,3 +1064,4 @@ async function boot() {
 }
 
 boot();
+
