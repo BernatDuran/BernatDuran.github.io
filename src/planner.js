@@ -3,13 +3,15 @@ import './styles/components.css';
 import './styles/pages.css';
 import { getAll, putAll } from './utils/db.js';
 import { categories, priorityLabels } from './data/cities.js';
-import { icons, formatScore, debounce } from './utils/helpers.js';
+import { icons, formatScore, debounce, parseEstimatedDurationToMinutes, formatDurationMinutes } from './utils/helpers.js';
+import { renderPlaceMap, getGoogleMapsUrl } from './utils/maps.js';
 import { registerSW } from 'virtual:pwa-register';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { sortCities } from './utils/cityData.js';
 import { formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
 import { runDataMigration } from './utils/dataMigration.js';
+import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
@@ -397,7 +399,7 @@ function renderPlannerScoreFilters() {
     : `&#x2B50; ${_plannerFilterState.scoreBands.join(', ')}`;
 
   return `
-    <details class="multi-select-dropdown score-filter-group">
+    <details class="filter-dropdown multi-select-dropdown score-filter-group">
       <summary class="zone-select multi-select-summary">${summaryLabel}</summary>
       <div class="multi-select-panel">
         ${scoreOptions.map((option) => {
@@ -409,6 +411,34 @@ function renderPlannerScoreFilters() {
               <input type="checkbox" data-planner-score-band="${option.value}" ${checked ? 'checked' : ''}>
               <span>&#x2B50; ${option.label}</span>
             </label>
+          `;
+        }).join('')}
+      </div>
+    </details>
+  `;
+}
+
+function escapeFilterAttribute(value) {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function renderPlannerSingleSelectFilter({ id, value, fallbackLabel, options }) {
+  const current = options.find((option) => String(option.value) === String(value));
+  const summaryLabel = current?.label || fallbackLabel;
+
+  return `
+    <details class="filter-dropdown single-select-dropdown">
+      <summary class="zone-select single-select-summary">${summaryLabel}</summary>
+      <div class="single-select-panel">
+        ${options.map((option) => {
+          const isActive = String(option.value) === String(value);
+          return `
+            <button type="button"
+                    class="single-select-option ${isActive ? 'active' : ''}"
+                    data-planner-filter-target="${id}"
+                    data-value="${escapeFilterAttribute(option.value)}">
+              ${option.label}
+            </button>
           `;
         }).join('')}
       </div>
@@ -433,10 +463,15 @@ function renderPlannerFilters(filteredCount) {
           <span class="results-count">${filteredCount} actividades visibles</span>
         </div>
         <div class="filters-row filters-row-controls">
-          <select class="zone-select" id="planner-city-filter">
-            <option value="">Todas las ciudades</option>
-            ${_citiesArray.map((city) => `<option value="${city.id}" ${_plannerFilterState.cityId === city.id ? 'selected' : ''}>${city.name}</option>`).join('')}
-          </select>
+          ${renderPlannerSingleSelectFilter({
+            id: 'cityId',
+            value: _plannerFilterState.cityId,
+            fallbackLabel: 'Todas las ciudades',
+            options: [
+              { value: '', label: 'Todas las ciudades' },
+              ..._citiesArray.map((city) => ({ value: city.id, label: city.name }))
+            ]
+          })}
           ${renderPlannerScoreFilters()}
         </div>
       </div>
@@ -496,6 +531,8 @@ function renderMiniCard(place, plannerItem) {
   const isDiscarded = plannerItem?.status === 'discarded';
   const cityName = getCityName(place.cityId);
   const scoreText = formatScore(place.score);
+  const durationText = place.estimatedDuration || '';
+  const hasCity = Boolean(cityName);
 
   return `
     <div class="planner-mini-card ${isDiscarded ? 'planner-card-discarded' : ''}"
@@ -504,9 +541,10 @@ function renderMiniCard(place, plannerItem) {
       <div class="planner-mini-info">
         <div class="planner-mini-name">${place.name}</div>
         <div class="planner-mini-meta">
-          ${cityName ? `<span class="planner-mini-city">${cityName}</span>` : ''}
-          <span class="planner-mini-sep">&middot;</span>
+          ${hasCity ? `<span class="planner-mini-city">${cityName}</span>` : ''}
+          ${hasCity ? `<span class="planner-mini-sep">&middot;</span>` : ''}
           <span title="${prio.label}" style="font-size:0.74rem;">${prio.icon}</span>
+          ${durationText ? `<span class="planner-mini-sep">&middot;</span><span class="planner-mini-duration-inline">${escapeHtml(durationText)}</span>` : ''}
         </div>
       </div>
       <div style="display:flex; align-items:center; flex-shrink:0;">
@@ -521,44 +559,58 @@ function renderMiniCard(place, plannerItem) {
     </div>`;
 }
 
+function getPlannerUmbrellaSVG(isFriendly) {
+  const color = isFriendly ? '#0ea5e9' : '#9ca3af';
+  const bg = isFriendly ? '#e0f2fe' : '#f3f4f6';
+  const title = isFriendly ? 'Apto para lluvia' : 'No apto para lluvia';
+  const svgPath = `<path d="M12 3v18m0-18C6 3 2 9 2 9h20s-4-6-10-6zm0 18c-1.5 0-3-1-3-3"/>`;
+  const crossLine = !isFriendly ? `<line x1="4" y1="4" x2="20" y2="20" stroke="#9ca3af" stroke-width="2"/>` : '';
+
+  return `
+    <div title="${title}" style="display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:${bg}; color:${color};">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
+        ${svgPath}
+        ${crossLine}
+      </svg>
+    </div>
+  `;
+}
+
 function renderModal(place) {
   const cat = categories.find((c) => c.id === place.category);
   const prio = priorityLabels[place.priority];
   const scoreText = formatScore(place.score);
   const plannerItem = _plannerItems.find((p) => p.placeId === place.id) || {};
   const cfg = getStatusConfig(plannerItem);
-
-  return `
-    <div class="modal-handle"></div>
-    <div class="modal-header">
-      <div>
-        <h2 style="margin-bottom:4px;">${place.name}</h2>
-        <div class="place-card-category" style="margin:0;"><span class="icon">${cat?.icon || '&#x1F4CD;'}</span> ${place.type} &middot; ${place.zone}</div>
-      </div>
-      <button class="modal-close" id="planner-modal-close">&#x2715;</button>
-    </div>
-    <div class="modal-body">
-      <div style="margin-bottom:15px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+  const mapsUrl = getGoogleMapsUrl(place, _globalSettings?.mapLinkStyle);
+  const plannerChipHtml = `<div class="planner-chip-container">
         <button class="planner-chip-trigger"
                 data-chip-place-id="${place.id}"
                 style="background:${cfg.bg}; color:${cfg.color}; border:1px solid ${cfg.border}; border-radius:999px; padding:5px 12px; font-size:0.8rem; font-weight:600; cursor:pointer; white-space:nowrap; display:flex; align-items:center; gap:5px; transition:all 0.15s;">
           <span>${cfg.icon}</span><span>${cfg.label}</span>
           <svg width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </button>
-        <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
-      </div>
-      <div class="modal-section"><div class="modal-section-title">Descripci&oacute;n</div><p style="line-height:1.7;">${place.description}</p></div>
-      ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos pr&aacute;cticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
-      <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
-        <div class="modal-info-grid">
-          <div class="modal-info-item"><span class="modal-info-label">&#x23F1;&#xFE0F; Duraci&oacute;n</span><span class="modal-info-value">${place.estimatedDuration || '&mdash;'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">&#x2600;&#xFE0F; Mejor momento</span><span class="modal-info-value">${formatBestTimeLabel(place.bestTime)}</span></div>
-          ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">&#x2B50; Puntuaci&oacute;n</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
-          ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">&#x1F3AB; Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
-        </div>
-      </div>
-      ${place.address ? `<div class="modal-section"><div class="modal-section-title">Direcci&oacute;n</div><div class="modal-address">${icons.mapPin} <a href="https://www.google.com/maps/search/${encodeURIComponent(place.address)}" target="_blank" class="address-link">${place.address}</a></div></div>` : ''}
-    </div>`;
+      </div>`;
+
+  return renderPlaceDetailModal({
+    place,
+    category: cat,
+    priority: prio,
+    scoreText,
+    plannerChipHtml,
+    requiresTicketHtml: place.requiresTicket ? `<span class="priority-badge" style="background:#eff6ff;color:#2563eb;">&#x1F3AB; Requiere entrada</span>` : '',
+    rainyToggleHtml: getPlannerUmbrellaSVG(place.rainyFriendly),
+    mapsLinkHtml: `<a href="${mapsUrl}" target="_blank" title="Abrir en Google Maps" class="modal-inline-icon-btn">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+      </a>`,
+    googleMapsUrl: mapsUrl,
+    timeIcon: place.bestTime ? '' : '&#x2600;&#xFE0F;',
+    bestTimeLabel: formatBestTimeLabel(place.bestTime),
+    closeButtonId: 'planner-modal-close',
+    showEditButton: false,
+    mapContainerId: `modal-map-${place.id}`,
+    commentLabel: 'Nota personal'
+  });
 }
 
 function renderViewToggle() {
@@ -690,16 +742,33 @@ function renderPlannerPage() {
   _selectedMapScope = normalizeMapScope(_selectedMapScope);
   const mapModel = buildMapModel(_selectedMapScope, groups);
 
+  const getDaySummary = (entries) => {
+    const totalMinutes = entries.reduce((sum, entry) => {
+      const minutes = parseEstimatedDurationToMinutes(entry.place?.estimatedDuration);
+      return Number.isFinite(minutes) ? sum + minutes : sum;
+    }, 0);
+
+    const formattedDuration = formatDurationMinutes(totalMinutes, { approximate: true });
+    return {
+      activityText: `${entries.length} actividad${entries.length !== 1 ? 'es' : ''}`,
+      durationText: formattedDuration ? `${formattedDuration} aprox.` : null
+    };
+  };
+
   const daysHtml = Array.from({ length: _totalTripDays }, (_, i) => {
     const day = i + 1;
     const entries = groups[day];
+    const summary = getDaySummary(entries);
     return `
       <div class="planner-day-block" data-day="${day}">
         <div class="planner-day-header">
           <div class="planner-day-number">${day}</div>
           <div>
             <div class="planner-day-label">${formatDayLabel(day)}</div>
-            <div class="planner-day-count">${entries.length} actividad${entries.length !== 1 ? 'es' : ''}</div>
+            <div class="planner-day-count">
+              <span>${summary.activityText}</span>
+              ${summary.durationText ? `<span class="planner-day-summary-sep">&middot;</span><span>${summary.durationText}</span>` : ''}
+            </div>
           </div>
         </div>
         <div class="planner-day-cards">
@@ -867,9 +936,13 @@ function attachPlannerFilterEvents() {
     });
   });
 
-  document.getElementById('planner-city-filter')?.addEventListener('change', (event) => {
-    _plannerFilterState.cityId = event.target.value;
-    renderPlannerPage();
+  document.querySelectorAll('[data-planner-filter-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const key = button.dataset.plannerFilterTarget;
+      if (!Object.prototype.hasOwnProperty.call(_plannerFilterState, key)) return;
+      _plannerFilterState[key] = button.dataset.value || '';
+      renderPlannerPage();
+    });
   });
 
   document.querySelectorAll('input[data-planner-score-band]').forEach((input) => {
@@ -889,6 +962,16 @@ function attachPlannerFilterEvents() {
 
   document.querySelector('.score-filter-group')?.addEventListener('toggle', (event) => {
     _plannerScoreDropdownOpen = event.currentTarget.open;
+  });
+
+  document.querySelectorAll('.filter-dropdown').forEach((dropdown) => {
+    dropdown.addEventListener('toggle', (event) => {
+      if (!event.currentTarget.open) return;
+      document.querySelectorAll('.filter-dropdown[open]').forEach((otherDropdown) => {
+        if (otherDropdown !== event.currentTarget) otherDropdown.removeAttribute('open');
+      });
+      _plannerScoreDropdownOpen = event.currentTarget.classList.contains('score-filter-group');
+    });
   });
 
   document.querySelectorAll('[data-planner-priority]').forEach((button) => {
@@ -915,6 +998,9 @@ function openPlaceModal(place) {
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
   document.getElementById('planner-modal-close')?.addEventListener('click', closePlaceModal);
+  setTimeout(() => {
+    renderPlaceMap(`modal-map-${place.id}`, place);
+  }, 100);
 }
 
 function closePlaceModal() {
@@ -1126,10 +1212,10 @@ document.addEventListener('change', handlePageChange);
 if (!window.__plannerScoreDropdownOutsideBound) {
   window.__plannerScoreDropdownOutsideBound = true;
   document.addEventListener('click', (event) => {
-    const openDropdown = document.querySelector('.score-filter-group[open]');
+    const openDropdown = document.querySelector('.filter-dropdown[open]');
     if (!openDropdown) return;
-    if (event.target.closest('.score-filter-group')) return;
-    openDropdown.removeAttribute('open');
+    if (event.target.closest('.filter-dropdown')) return;
+    document.querySelectorAll('.filter-dropdown[open]').forEach((dropdown) => dropdown.removeAttribute('open'));
     _plannerScoreDropdownOpen = false;
   });
 }

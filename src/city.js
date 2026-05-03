@@ -11,12 +11,13 @@ import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { formatRecommendedDays, sortCities } from './utils/cityData.js';
 import { BEST_TIME_OPTIONS, formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
 import { runDataMigration } from './utils/dataMigration.js';
+import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 // Register PWA Service Worker
 if ('serviceWorker' in navigator) {
   registerSW({ immediate: true });
 }
 
-export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems, globalSettings) {
+export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems, globalSettings, pendingEditPlaceId = '') {
   const app = document.getElementById('app');
   const cityColor = cityMeta.color;
 
@@ -42,6 +43,20 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     }
 
     return candidate;
+  }
+
+  function clearPendingEditUrl() {
+    try {
+      sessionStorage.removeItem('pendingPlaceEdit');
+    } catch {
+      // Storage can be unavailable in some browser privacy modes.
+    }
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('editPlace')) {
+      url.searchParams.delete('editPlace');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+    }
   }
 
   let totalTripDays = 1;
@@ -184,29 +199,50 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
           </div>
           <div class="filters-row filters-row-controls">
             ${renderCategoryFilters()}
-            <select class="zone-select" id="zone-select">
-              <option value="">Todas las zonas</option>
-              ${zones.map(z => `<option value="${z}" ${state.zone === z ? 'selected' : ''}>${z}</option>`).join('')}
-            </select>
-            <select id="time-filter" class="zone-select">
-              <option value="" ${state.timeOfDay === '' ? 'selected' : ''}>&#x1F551; Cualquier momento</option>
-              <option value="mañana" ${state.timeOfDay === 'mañana' ? 'selected' : ''}>&#x2600;&#xFE0F; Ma&ntilde;ana</option>
-              <option value="tarde" ${state.timeOfDay === 'tarde' ? 'selected' : ''}>&#x1F307; Tarde</option>
-              <option value="noche" ${state.timeOfDay === 'noche' ? 'selected' : ''}>&#x1F319; Noche</option>
-            </select>
+            ${renderSingleSelectFilter({
+              id: 'zone',
+              value: state.zone,
+              fallbackLabel: 'Todas las zonas',
+              options: [
+                { value: '', label: 'Todas las zonas' },
+                ...zones.map((zone) => ({ value: zone, label: zone }))
+              ]
+            })}
+            ${renderSingleSelectFilter({
+              id: 'timeOfDay',
+              value: state.timeOfDay,
+              fallbackLabel: '&#x1F551; Cualquier momento',
+              options: [
+                { value: '', label: '&#x1F551; Cualquier momento' },
+                { value: 'mañana', label: '&#x2600;&#xFE0F; Ma&ntilde;ana' },
+                { value: 'tarde', label: '&#x1F307; Tarde' },
+                { value: 'noche', label: '&#x1F319; Noche' }
+              ]
+            })}
             ${renderScoreFilters()}
-            <select id="status-filter" class="zone-select">
-              <option value="">Todos los estados</option>
-              <option value="none" ${state.plannerFilter === 'none' ? 'selected' : ''}>Sin asignar</option>
-              <option value="in-tray" ${state.plannerFilter === 'in-tray' ? 'selected' : ''}>En bandeja</option>
-              <option value="planned" ${state.plannerFilter === 'planned' ? 'selected' : ''}>Planeado</option>
-              <option value="done" ${state.plannerFilter === 'done' ? 'selected' : ''}>Realizado</option>
-              <option value="discarded" ${state.plannerFilter === 'discarded' ? 'selected' : ''}>Descartado</option>
-            </select>
-            <select id="day-filter" class="zone-select">
-              <option value="">Todos los d&iacute;as</option>
-              ${Array.from({length: totalTripDays}, (_, i) => `<option value="${i+1}" ${state.plannerDay === String(i+1) ? 'selected' : ''}>D&iacute;a ${i+1}</option>`).join('')}
-            </select>
+            ${renderSingleSelectFilter({
+              id: 'plannerFilter',
+              value: state.plannerFilter,
+              fallbackLabel: 'Todos los estados',
+              options: [
+                { value: '', label: 'Todos los estados' },
+                { value: 'none', label: 'Sin asignar' },
+                { value: 'in-tray', label: 'En bandeja' },
+                { value: 'planned', label: 'Planeado' },
+                { value: 'done', label: 'Realizado' },
+                { value: 'discarded', label: 'Descartado' }
+              ]
+            })}
+            ${renderSingleSelectFilter({
+              id: 'plannerDay',
+              className: 'day-filter-dropdown',
+              value: state.plannerDay,
+              fallbackLabel: 'Todos los d&iacute;as',
+              options: [
+                { value: '', label: 'Todos los d&iacute;as' },
+                ...Array.from({ length: totalTripDays }, (_, i) => ({ value: String(i + 1), label: `D&iacute;a ${i + 1}` }))
+              ]
+            })}
             ${hasActiveFilters() ? `<button class="clear-filters" id="clear-filters">Limpiar filtros</button>` : ''}
           </div>
         </div>
@@ -299,13 +335,45 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   }
 
   function renderCategoryFilters() {
-    return `<select class="zone-select" id="category-select">
-      <option value="">Todas las categor&iacute;as</option>
-      ${categories
-        .filter(c => places.some(p => p.category === c.id))
-        .map(c => `<option value="${c.id}" ${state.category === c.id ? 'selected' : ''}>${c.icon} ${c.label}</option>`)
-        .join('')}
-    </select>`;
+    return renderSingleSelectFilter({
+      id: 'category',
+      value: state.category,
+      fallbackLabel: 'Todas las categor&iacute;as',
+      options: [
+        { value: '', label: 'Todas las categor&iacute;as' },
+        ...categories
+          .filter(c => places.some(p => p.category === c.id))
+          .map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))
+      ]
+    });
+  }
+
+  function escapeFilterAttribute(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  function renderSingleSelectFilter({ id, value, fallbackLabel, options, className = '' }) {
+    const current = options.find((option) => String(option.value) === String(value));
+    const summaryLabel = current?.label || fallbackLabel;
+
+    return `
+      <details class="filter-dropdown single-select-dropdown ${className}">
+        <summary class="zone-select single-select-summary">${summaryLabel}</summary>
+        <div class="single-select-panel">
+          ${options.map((option) => {
+            const isActive = String(option.value) === String(value);
+            return `
+              <button type="button"
+                      class="single-select-option ${isActive ? 'active' : ''}"
+                      data-filter-target="${id}"
+                      data-value="${escapeFilterAttribute(option.value)}">
+                ${option.label}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </details>
+    `;
   }
 
   function renderScoreFilters() {
@@ -325,7 +393,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       : `&#x2B50; ${state.scoreBands.join(', ')}`;
 
     return `
-      <details class="multi-select-dropdown score-filter-group">
+      <details class="filter-dropdown multi-select-dropdown score-filter-group">
         <summary class="zone-select multi-select-summary">${summaryLabel}</summary>
         <div class="multi-select-panel">
           ${scoreOptions.map((option) => {
@@ -450,50 +518,26 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     const cat = categories.find(c => c.id === place.category);
     const prio = priorityLabels[place.priority];
     const scoreText = formatScore(place.score);
-    
-    return `<div class="modal-handle"></div>
-      <div class="modal-header">
-        <div>
-          <h2 style="margin-bottom:4px;">${place.name}</h2>
-          <div class="place-card-category" style="margin:0;"><span class="icon">${cat?.icon||'&#x1F4CD;'}</span> ${place.type} &middot; ${place.zone}</div>
-        </div>
-        <button class="modal-close" id="modal-close">&#x2715;</button>
-      </div>
-      <div class="modal-body">
-        <div class="modal-toolbar">
-          <div class="modal-toolbar-row">
-            <div class="modal-badges modal-badges-inline">
-              ${getPlannerChipUI(place.id)}
-              <span class="priority-badge ${prio.class}">${prio.icon} ${prio.label}</span>
-              ${place.requiresTicket ? `<span class="priority-badge" style="background:#eff6ff;color:#2563eb;">&#x1F3AB; Requiere entrada</span>` : ''}
-              ${getUmbrellaSVG(place.rainyFriendly, true, place.id)}
-              <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" class="modal-inline-icon-btn">
+    return renderPlaceDetailModal({
+      place,
+      category: cat,
+      priority: prio,
+      scoreText,
+      plannerChipHtml: getPlannerChipUI(place.id),
+      requiresTicketHtml: place.requiresTicket ? `<span class="priority-badge" style="background:#eff6ff;color:#2563eb;">&#x1F3AB; Requiere entrada</span>` : '',
+      rainyToggleHtml: getUmbrellaSVG(place.rainyFriendly, true, place.id),
+      mapsLinkHtml: `<a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" title="Abrir en Google Maps" class="modal-inline-icon-btn">
                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-              </a>
-            </div>
-            <button type="button" id="edit-place-btn" class="filter-pill modal-edit-btn" style="border:1px solid var(--border); background:var(--bg-secondary);">&#x270F;&#xFE0F; Editar actividad</button>
-          </div>
-        </div>
-        <div class="modal-section"><div class="modal-section-title">Descripci&oacute;n</div><p style="line-height:1.7;">${place.description}</p></div>
-        ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos pr&aacute;cticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
-        <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
-        <div class="modal-info-grid">
-          <div class="modal-info-item"><span class="modal-info-label">&#x1F4CD; Zona</span><span class="modal-info-value">${place.zone || 'Pendiente'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">${cat?.icon || '&#x1F4CC;'} Categor&iacute;a</span><span class="modal-info-value">${cat?.label || 'Pendiente'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">&#x23F1;&#xFE0F; Duraci&oacute;n estimada</span><span class="modal-info-value">${place.estimatedDuration || 'Pendiente'}</span></div>
-          <div class="modal-info-item"><span class="modal-info-label">${getTimeIcon(place.bestTime)} Mejor momento</span><span class="modal-info-value">${formatBestTimeLabel(place.bestTime)}</span></div>
-          ${scoreText ? `<div class="modal-info-item"><span class="modal-info-label">&#x2B50; Puntuaci&oacute;n</span><span class="modal-info-value">${scoreText}</span></div>` : ''}
-          ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">&#x1F3AB; Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
-        </div></div>
-        ${place.comment ? `<div class="modal-section"><div class="modal-section-title">Nota personal</div><div class="modal-comment">"${place.comment}"</div></div>` : ''}
-        ${place.address ? `<div class="modal-section"><div class="modal-section-title">Direcci&oacute;n</div><div class="modal-address">${icons.mapPin} <a href="https://www.google.com/maps/search/${encodeURIComponent(place.address).replace(/%20/g, '+')}" target="_blank" class="address-link">${place.address}</a></div></div>` : ''}
-        
-        <div class="modal-section">
-          <div class="modal-section-title">Ubicaci&oacute;n</div>
-          <div id="modal-map-${place.id}" class="modal-map"></div>
-          <a href="${getGoogleMapsUrl(place, globalSettings?.mapLinkStyle)}" target="_blank" class="maps-link-btn" style="width:100%;text-align:center;justify-content:center;padding:12px;margin-top:12px;">&#x1F4CD; Abrir en Google Maps (Navegar)</a>
-        </div>
-      </div>`;
+              </a>`,
+      googleMapsUrl: getGoogleMapsUrl(place, globalSettings?.mapLinkStyle),
+      timeIcon: getTimeIcon(place.bestTime),
+      bestTimeLabel: formatBestTimeLabel(place.bestTime),
+      closeButtonId: 'modal-close',
+      editButtonId: 'edit-place-btn',
+      showEditButton: true,
+      mapContainerId: `modal-map-${place.id}`,
+      commentLabel: 'Nota personal'
+    });
   }
 
 
@@ -703,19 +747,20 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       });
     });
 
-    // Category select
-    document.getElementById('category-select')?.addEventListener('change', e => { state.category = e.target.value; render(); });
-
     // Priority filters
     document.querySelectorAll('[data-priority]').forEach(btn => {
       btn.addEventListener('click', () => { state.priority = state.priority === btn.dataset.priority ? '' : btn.dataset.priority; render(); });
     });
 
-    // Zone select
-    document.getElementById('zone-select')?.addEventListener('change', e => { state.zone = e.target.value; render(); });
-
-    // Time select
-    document.getElementById('time-filter')?.addEventListener('change', e => { state.timeOfDay = e.target.value; render(); });
+    // Single-select dropdown filters
+    document.querySelectorAll('[data-filter-target]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.filterTarget;
+        if (!Object.prototype.hasOwnProperty.call(state, key)) return;
+        state[key] = button.dataset.value || '';
+        render();
+      });
+    });
 
     // Score filters
     document.querySelectorAll('input[data-score-band]').forEach((input) => {
@@ -737,12 +782,15 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       scoreDropdownOpen = event.currentTarget.open;
     });
 
-
-    // Status select
-    document.getElementById('status-filter')?.addEventListener('change', e => { state.plannerFilter = e.target.value; render(); });
-
-    // Day select
-    document.getElementById('day-filter')?.addEventListener('change', e => { state.plannerDay = e.target.value; render(); });
+    document.querySelectorAll('.filter-dropdown').forEach((dropdown) => {
+      dropdown.addEventListener('toggle', (event) => {
+        if (!event.currentTarget.open) return;
+        document.querySelectorAll('.filter-dropdown[open]').forEach((otherDropdown) => {
+          if (otherDropdown !== event.currentTarget) otherDropdown.removeAttribute('open');
+        });
+        scoreDropdownOpen = event.currentTarget.classList.contains('score-filter-group');
+      });
+    });
 
     document.getElementById('rainy-filter')?.addEventListener('click', () => {
       state.rainyFriendly = !state.rainyFriendly;
@@ -870,16 +918,25 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   if (!window.__cityScoreDropdownOutsideBound) {
     window.__cityScoreDropdownOutsideBound = true;
     document.addEventListener('click', (event) => {
-      const openDropdown = document.querySelector('.score-filter-group[open]');
+      const openDropdown = document.querySelector('.filter-dropdown[open]');
       if (!openDropdown) return;
-      if (event.target.closest('.score-filter-group')) return;
-      openDropdown.removeAttribute('open');
+      if (event.target.closest('.filter-dropdown')) return;
+      document.querySelectorAll('.filter-dropdown[open]').forEach((dropdown) => dropdown.removeAttribute('open'));
       scoreDropdownOpen = false;
     });
   }
 
   // Initial render
   render();
+  if (pendingEditPlaceId) {
+    const pendingPlace = places.find((place) => String(place.id) === String(pendingEditPlaceId));
+    clearPendingEditUrl();
+    if (pendingPlace) {
+      requestAnimationFrame(() => {
+        openPlaceForm(pendingPlace);
+      });
+    }
+  }
 }
 
 async function boot() {
@@ -899,6 +956,26 @@ async function boot() {
   }
 
   const allPlaces = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+  let pendingEditPlaceId = urlParams.get('editPlace') || '';
+
+  try {
+    const pendingEdit = JSON.parse(sessionStorage.getItem('pendingPlaceEdit') || 'null');
+    const isFresh = pendingEdit?.createdAt && Date.now() - pendingEdit.createdAt < 5 * 60 * 1000;
+    if (isFresh && pendingEdit.placeId) {
+      pendingEditPlaceId = pendingEdit.placeId;
+    }
+  } catch {
+    pendingEditPlaceId = pendingEditPlaceId || '';
+  }
+
+  if (pendingEditPlaceId) {
+    const targetPlace = allPlaces.find((place) => String(place.id) === String(pendingEditPlaceId));
+    if (targetPlace?.cityId && targetPlace.cityId !== cityId) {
+      window.location.href = `/city.html?id=${encodeURIComponent(targetPlace.cityId)}`;
+      return;
+    }
+  }
+
   const places = allPlaces.filter(p => p.cityId === cityId);
   const citiesArray = sortCities(await getAll('cities'));
   const plannerItems = await getAll('planner');
@@ -908,7 +985,7 @@ async function boot() {
   
   document.title = `${cityMeta.name} — Japón 2026`;
   
-  initCityPage(cityMeta, places, citiesArray, plannerItems, globalSettings);
+  initCityPage(cityMeta, places, citiesArray, plannerItems, globalSettings, pendingEditPlaceId);
 }
 
 boot();

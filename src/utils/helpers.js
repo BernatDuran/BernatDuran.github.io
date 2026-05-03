@@ -27,6 +27,124 @@ export function debounce(fn, delay = 300) {
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); };
 }
 
+function normalizeDurationText(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replaceAll(',', '.')
+    .replace(/[–—]/g, '-')
+    .replace(/\s+/g, ' ');
+}
+
+function convertDurationValueToMinutes(value, unit) {
+  if (!Number.isFinite(value)) return null;
+
+  if (unit === 'hours') return value * 60;
+  if (unit === 'minutes') return value;
+  return null;
+}
+
+function normalizeDurationUnit(rawUnit) {
+  const unit = String(rawUnit ?? '').trim().toLowerCase();
+  if (!unit) return null;
+
+  if (['h', 'hr', 'hrs', 'hora', 'horas', 'hor', 'hour', 'hours'].includes(unit)) return 'hours';
+  if (['m', 'min', 'mins', 'minuto', 'minutos', 'minute', 'minutes'].includes(unit)) return 'minutes';
+  return null;
+}
+
+function parseUnitBasedRange(text) {
+  const match = text.match(
+    /^\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hora|horas|hor|hour|hours|m|min|mins|minuto|minutos|minute|minutes)?\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hora|horas|hor|hour|hours|m|min|mins|minuto|minutos|minute|minutes)?\s*$/
+  );
+  if (!match) return null;
+
+  const leftValue = Number.parseFloat(match[1]);
+  const rightValue = Number.parseFloat(match[3]);
+  let leftUnit = normalizeDurationUnit(match[2]);
+  let rightUnit = normalizeDurationUnit(match[4]);
+
+  if (!leftUnit && rightUnit) leftUnit = rightUnit;
+  if (!rightUnit && leftUnit) rightUnit = leftUnit;
+
+  const leftMinutes = convertDurationValueToMinutes(leftValue, leftUnit);
+  const rightMinutes = convertDurationValueToMinutes(rightValue, rightUnit);
+
+  if (!Number.isFinite(leftMinutes) || !Number.isFinite(rightMinutes)) return null;
+  return (leftMinutes + rightMinutes) / 2;
+}
+
+function parseExplicitDurationTokens(text) {
+  const tokenRegex = /(\d+(?:\.\d+)?)\s*(h|hr|hrs|hora|horas|hor|hour|hours|m|min|mins|minuto|minutos|minute|minutes)\b/g;
+  let match;
+  let totalMinutes = 0;
+  let found = false;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    const value = Number.parseFloat(match[1]);
+    const unit = normalizeDurationUnit(match[2]);
+    const minutes = convertDurationValueToMinutes(value, unit);
+    if (!Number.isFinite(minutes)) continue;
+    totalMinutes += minutes;
+    found = true;
+  }
+
+  return found ? totalMinutes : null;
+}
+
+function parseUnitlessDuration(text) {
+  const singleMatch = text.match(/^\s*(\d+(?:\.\d+)?)\s*$/);
+  if (singleMatch) {
+    const minutes = Number.parseFloat(singleMatch[1]);
+    if (minutes > 15 && minutes < 600) return minutes;
+    return null;
+  }
+
+  const rangeMatch = text.match(/^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$/);
+  if (rangeMatch) {
+    const start = Number.parseFloat(rangeMatch[1]);
+    const end = Number.parseFloat(rangeMatch[2]);
+    if (start > 15 && start < 600 && end > 15 && end < 600) {
+      return (start + end) / 2;
+    }
+  }
+
+  return null;
+}
+
+export function parseEstimatedDurationToMinutes(value) {
+  const normalized = normalizeDurationText(value);
+  if (!normalized) return null;
+
+  const rangeMinutes = parseUnitBasedRange(normalized);
+  if (Number.isFinite(rangeMinutes)) return rangeMinutes;
+
+  const tokenMinutes = parseExplicitDurationTokens(normalized);
+  if (Number.isFinite(tokenMinutes)) return tokenMinutes;
+
+  const unitlessMinutes = parseUnitlessDuration(normalized);
+  if (Number.isFinite(unitlessMinutes)) return unitlessMinutes;
+
+  return null;
+}
+
+export function formatDurationMinutes(totalMinutes, options = {}) {
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return null;
+
+  const roundedMinutes = options.approximate
+    ? Math.max(5, Math.round(totalMinutes / 5) * 5)
+    : Math.round(totalMinutes);
+
+  const hours = Math.floor(roundedMinutes / 60);
+  const minutes = roundedMinutes % 60;
+
+  if (hours > 0 && minutes > 0) return `${hours} h ${minutes} min`;
+  if (hours > 0) return `${hours} h`;
+  return `${minutes} min`;
+}
+
 export function getTimeIcon(timeStr) {
   const normalized = normalizeBestTimeValue(timeStr);
   if (normalized === 'noche') return '\u{1F319}';
