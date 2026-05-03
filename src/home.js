@@ -7,7 +7,7 @@ import { icons } from './utils/helpers.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { getAll } from './utils/db.js';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
-import { sortCities } from './utils/cityData.js';
+import { formatRecommendedDays, sortCities } from './utils/cityData.js';
 
 const app = document.getElementById('app');
 
@@ -204,7 +204,7 @@ function renderCityCard(city, allPlaces) {
       <div class="city-card-stats">
         <div class="city-card-stat">📍 <strong>${count}</strong> lugares</div>
         <div class="city-card-stat">🔥 <strong>${mustSee}</strong> imprescindibles</div>
-        <div class="city-card-stat">📅 <strong>${city.recommendedDays}</strong></div>
+        <div class="city-card-stat">📅 <strong>${formatRecommendedDays(city.recommendedDays)}</strong></div>
       </div>
       <div class="city-card-highlights">
         ${(city.highlights || []).map(h => `<span>${h}</span>`).join('')}

@@ -53,12 +53,22 @@ export async function runDataMigration() {
       const lngMismatch = (current?.coordinates?.lng ?? null) !== (place.coordinates?.lng ?? null);
       const bestTimeMismatch = current?.bestTime !== place.bestTime;
       const hasLegacySource = Object.prototype.hasOwnProperty.call(current || {}, 'source');
+      const textMismatch = current?.name !== place.name
+        || current?.type !== place.type
+        || current?.zone !== place.zone
+        || current?.description !== place.description
+        || (current?.address ?? null) !== place.address
+        || (current?.estimatedDuration ?? null) !== place.estimatedDuration
+        || (current?.ticketInfo ?? null) !== place.ticketInfo
+        || (current?.tips ?? null) !== place.tips
+        || (current?.comment ?? null) !== place.comment;
       return hasLegacyScore
         || current?.score !== place.score
         || current?.rainyFriendly !== place.rainyFriendly
         || current?.requiresTicket !== place.requiresTicket
         || bestTimeMismatch
         || hasLegacySource
+        || textMismatch
         || latMismatch
         || lngMismatch;
     });
@@ -72,7 +82,8 @@ export async function runDataMigration() {
     const normalizedCities = existingCities.map((city, index) => normalizeCityRecord(city, index));
     const needsCityNormalization = normalizedCities.some((city, index) => {
       const current = existingCities[index];
-      return current?.sortOrder !== city.sortOrder;
+      return current?.sortOrder !== city.sortOrder
+        || current?.recommendedDays !== city.recommendedDays;
     });
 
     if (needsCityNormalization) {

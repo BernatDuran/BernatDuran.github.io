@@ -6,7 +6,7 @@ import Sortable from 'sortablejs';
 import { icons } from './utils/helpers.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { normalizePlaceRecord, PLACE_IMPORT_EXPORT_FIELDS, toImportExportRow } from './utils/placeData.js';
-import { normalizeCityRecord, sortCities } from './utils/cityData.js';
+import { formatRecommendedDays, normalizeCityRecord, sortCities } from './utils/cityData.js';
 import * as XLSX from 'xlsx';
 
 const app = document.getElementById('app');
@@ -168,7 +168,7 @@ async function render() {
                 <span class="admin-city-grip" aria-hidden="true">&#x2630;</span>
                 <div>
                   <div style="font-weight:bold;">${city.name} ${city.nameJa ? `<span style="font-size:0.85em; color:var(--text-secondary);">${city.nameJa}</span>` : ''}</div>
-                  <div style="font-size:0.85rem; color:var(--text-secondary);">ID: ${city.id} &middot; ${city.recommendedDays} d&iacute;as &middot; ${city.zones.length} zonas</div>
+                  <div style="font-size:0.85rem; color:var(--text-secondary);">ID: ${city.id} &middot; ${formatRecommendedDays(city.recommendedDays)} &middot; ${city.zones.length} zonas</div>
                 </div>
               </div>
               <button class="filter-pill btn-edit-city" data-city-id="${city.id}">&#x270F;&#xFE0F; Editar</button>
@@ -219,7 +219,7 @@ async function render() {
           <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
             <div style="flex:1;">
             <label>D&iacute;as recomendados</label>
-              <input type="number" id="city-days" min="1" value="3" required style="width:100%;">
+              <input type="text" id="city-days" value="3 d&iacute;as" required style="width:100%;">
             </div>
             <div style="flex:2;">
               <label>Zonas (separadas por coma)</label>
@@ -464,7 +464,7 @@ function attachEvents() {
       description: document.getElementById('city-description').value.trim(),
       summary: document.getElementById('city-summary').value.trim(),
       idealFor: document.getElementById('city-ideal-for').value.trim(),
-      recommendedDays: parseInt(document.getElementById('city-days').value) || 3,
+      recommendedDays: document.getElementById('city-days').value.trim() || '3 días',
       zones: zones.length > 0 ? zones : ["Centro"],
       highlights: highlights,
       center: [lat || 0, lng || 0],
@@ -611,7 +611,7 @@ function attachEvents() {
             <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
               <div style="flex:1;">
                 <label>D&iacute;as recomendados</label>
-                <input type="number" id="edit-city-days" min="1" value="${parseInt(city.recommendedDays) || 3}" required style="width:100%;">
+                <input type="text" id="edit-city-days" value="${city.recommendedDays || '3 días'}" required style="width:100%;">
               </div>
               <div style="flex:2;">
                 <label>Zonas (separadas por coma)</label>
@@ -666,7 +666,7 @@ function attachEvents() {
           description: document.getElementById('edit-city-description').value.trim(),
           summary: document.getElementById('edit-city-summary').value.trim(),
           idealFor: document.getElementById('edit-city-ideal-for').value.trim(),
-          recommendedDays: parseInt(document.getElementById('edit-city-days').value) || 3,
+          recommendedDays: document.getElementById('edit-city-days').value.trim() || '3 días',
           zones: zones.length > 0 ? zones : ["Centro"],
           highlights: highlights,
           center: [lat || 0, lng || 0]

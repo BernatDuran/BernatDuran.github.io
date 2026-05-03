@@ -28,6 +28,22 @@ export const BEST_TIME_OPTIONS = [
 ];
 
 const BEST_TIME_LABELS = Object.fromEntries(BEST_TIME_OPTIONS.map((option) => [option.value, option.label]));
+const SUSPICIOUS_MOJIBAKE_PATTERN = /[ÃÂÅÆæð]/;
+
+export function repairMojibakeText(value) {
+  if (typeof value !== 'string') return value;
+  if (!SUSPICIOUS_MOJIBAKE_PATTERN.test(value)) return value;
+
+  try {
+    const bytes = Uint8Array.from(Array.from(value, (char) => char.charCodeAt(0) & 0xff));
+    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    if (!decoded) return value;
+    if (decoded.includes('�') && !value.includes('�')) return value;
+    return decoded;
+  } catch {
+    return value;
+  }
+}
 
 function normalizeBoolean(value) {
   if (value === '' || value == null) return null;
@@ -106,16 +122,20 @@ export function normalizePlaceRecord(place) {
 
   return {
     ...rest,
+    name: repairMojibakeText(rest?.name || ''),
+    type: repairMojibakeText(rest?.type || ''),
     priority: rest?.priority || 'optional',
     score: normalizeScoreValue(rest?.score),
     rainyFriendly: rainyFriendly ?? false,
     requiresTicket: requiresTicket ?? false,
-    address: rest?.address || null,
-    estimatedDuration: rest?.estimatedDuration || null,
+    zone: repairMojibakeText(rest?.zone || ''),
+    description: repairMojibakeText(rest?.description || ''),
+    address: repairMojibakeText(rest?.address || '') || null,
+    estimatedDuration: repairMojibakeText(rest?.estimatedDuration || '') || null,
     bestTime: normalizeBestTimeValue(rest?.bestTime),
-    ticketInfo: rest?.ticketInfo || null,
-    tips: rest?.tips || null,
-    comment: rest?.comment || null,
+    ticketInfo: repairMojibakeText(rest?.ticketInfo || '') || null,
+    tips: repairMojibakeText(rest?.tips || '') || null,
+    comment: repairMojibakeText(rest?.comment || '') || null,
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
     coordinates: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
