@@ -1,65 +1,59 @@
-import { registerSW } from 'virtual:pwa-register';
+﻿import { registerSW } from 'virtual:pwa-register';
 import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
-import { icons } from './utils/helpers.js';
 import { getAll } from './utils/db.js';
+import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
+import { sortCities } from './utils/cityData.js';
 
-function renderNav(globalSettings) {
-  const plannerLink = globalSettings?.plannerEnabled ? `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">🗓️ Planner</a>` : '';
+function renderNav(citiesArray) {
+  const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
   return `<nav class="nav" id="main-nav">
     <div class="nav-inner">
-      <a href="/" class="nav-logo">🇯🇵 Japón 2026 <span class="ja">日本</span></a>
+      <a href="/" class="nav-logo">&#x1F1EF;&#x1F1F5; Jap&oacute;n 2026 <span class="ja">&#x65E5;&#x672C;</span></a>
       <div class="nav-links">
         <a href="/">Inicio</a>
-        <a href="/city.html?id=tokyo">Tokio</a>
-        <a href="/city.html?id=kyoto">Kioto</a>
-        <a href="/city.html?id=osaka">Osaka</a>
+        <span class="nav-separator" aria-hidden="true">|</span>
+        ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('')}
+        <span class="nav-separator" aria-hidden="true">|</span>
         ${plannerLink}
         <div class="nav-tools">
-          <a href="/admin.html" class="nav-tool-btn" title="Administración">⚙️</a>
+          <a href="/admin.html" class="nav-tool-btn" title="Administraci&oacute;n">&#x2699;&#xFE0F;</a>
         </div>
       </div>
       <div class="nav-mobile-tools">
-          <a href="/admin.html" class="nav-tool-btn" title="Admin">⚙️</a>
-        <button class="nav-mobile-toggle" id="mobile-toggle">${icons.menu}</button>
+        <a href="/admin.html" class="nav-tool-btn" title="Admin">&#x2699;&#xFE0F;</a>
+        ${renderMobileMenu('mobile-toggle', 'mobile-menu', `
+          <a href="/">Inicio</a>
+          ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name} ${city.nameJa || ''}</a>`).join('')}
+          ${plannerLink}
+        `)}
       </div>
-    </div>
-    <div class="nav-mobile-menu" id="mobile-menu">
-      <a href="/">Inicio</a>
-      <a href="/city.html?id=tokyo">Tokio 東京</a>
-      <a href="/city.html?id=kyoto">Kioto 京都</a>
-      <a href="/city.html?id=osaka">Osaka 大阪</a>
-      ${plannerLink}
     </div>
   </nav>`;
 }
 
-function render(globalSettings) {
+function render(citiesArray) {
   const app = document.getElementById('app');
   app.innerHTML = `
-    ${renderNav(globalSettings)}
+    ${renderNav(citiesArray)}
     <section class="section" style="min-height: 80vh;">
       <div class="container container-narrow">
         <div class="home-section-title">
-          <h2>🧰 Herramientas Útiles</h2>
-          <p>Próximamente disponibles</p>
+          <h2>&#x1F9F0; Herramientas Utiles</h2>
+          <p>Proximamente disponibles</p>
         </div>
         <div style="text-align:center; padding: var(--space-2xl); color: var(--text-tertiary); font-size:0.9rem;">
-          ⚙️ Las herramientas están temporalmente deshabilitadas.
+          &#x2699;&#xFE0F; Las herramientas estan temporalmente deshabilitadas.
         </div>
       </div>
     </section>
   `;
 
-  // Events
-  document.getElementById('mobile-toggle')?.addEventListener('click', () => {
-    document.getElementById('mobile-menu')?.classList.toggle('open');
-  });
+  bindMobileNav('mobile-toggle', 'mobile-menu');
   window.addEventListener('scroll', () => {
     document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
   });
-
 
   if (window.location.hash) {
     setTimeout(() => {
@@ -68,16 +62,14 @@ function render(globalSettings) {
     }, 100);
   }
 
-  // Register PWA Service Worker
   if ('serviceWorker' in navigator) {
     registerSW({ immediate: true });
   }
 }
 
 async function boot() {
-  const settingsArray = await getAll('settings') || [];
-  const globalSettings = settingsArray.find(s => s.id === 'global') || {};
-  render(globalSettings);
+  const citiesArray = sortCities(await getAll('cities'));
+  render(citiesArray);
 }
 
 boot();

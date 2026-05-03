@@ -6,12 +6,14 @@ import { tripInfo } from './data/cities.js';
 import { icons } from './utils/helpers.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { getAll } from './utils/db.js';
+import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
+import { sortCities } from './utils/cityData.js';
 
 const app = document.getElementById('app');
 
 async function init() {
   await runDataMigration();
-  const dbCities = await getAll('cities');
+  const dbCities = sortCities(await getAll('cities'));
   const dbPlaces = await getAll('places');
   const settingsArray = await getAll('settings') || [];
   const globalSettings = settingsArray.find(s => s.id === 'global') || {};
@@ -20,7 +22,8 @@ async function init() {
 
 function render(citiesArray, allPlaces, globalSettings) {
   const totalPlaces = allPlaces.length;
-  const plannerLink = globalSettings?.plannerEnabled ? `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">🗓️ Planner</a>` : '';
+  const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
+  const cityLinks = citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('');
 
   const startDateStr = globalSettings?.startDate || '2026-06-30';
   const endDateStr = globalSettings?.endDate || '2026-07-16';
@@ -37,7 +40,9 @@ function render(citiesArray, allPlaces, globalSettings) {
         <a href="/" class="nav-logo">🇯🇵 Japón 2026 <span class="ja">日本</span></a>
         <div class="nav-links">
           <a href="/" class="active">Inicio</a>
-          ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('')}
+          <span class="nav-separator" aria-hidden="true">|</span>
+          ${cityLinks}
+          <span class="nav-separator" aria-hidden="true">|</span>
           ${plannerLink}
           <div class="nav-tools">
             <a href="/admin.html" class="nav-tool-btn" title="Administración">⚙️</a>
@@ -45,13 +50,12 @@ function render(citiesArray, allPlaces, globalSettings) {
         </div>
         <div class="nav-mobile-tools">
           <a href="/admin.html" class="nav-tool-btn" title="Admin">⚙️</a>
-          <button class="nav-mobile-toggle" id="mobile-toggle">${icons.menu}</button>
+          ${renderMobileMenu('mobile-toggle', 'mobile-menu', `
+            <a href="/" class="active">Inicio</a>
+            ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name} ${city.nameJa || ''}</a>`).join('')}
+            ${plannerLink}
+          `)}
         </div>
-      </div>
-        <div class="nav-mobile-menu" id="mobile-menu">
-        <a href="/">Inicio</a>
-        ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name} ${city.nameJa || ''}</a>`).join('')}
-        ${plannerLink}
       </div>
     </nav>
 
@@ -118,7 +122,6 @@ function render(citiesArray, allPlaces, globalSettings) {
         </div>
         <div class="tips-grid">
           <div class="tip-card"><div class="tip-card-icon">🌡️</div><h4>Clima en julio</h4><p>Julio es caluroso y húmedo (30-35°C). Lleva ropa ligera, protector solar y botella de agua. Los konbini tienen aire acondicionado para refugiarte.</p></div>
-          <div class="tip-card"><div class="tip-card-icon">🚅</div><h4>Japan Rail Pass</h4><p>El JR Pass cubre los Shinkansen entre ciudades. Evalúa si te compensa según tu itinerario. Reserva antes del viaje.</p></div>
           <div class="tip-card"><div class="tip-card-icon">💴</div><h4>Dinero</h4><p>Japón usa mucho efectivo. Saca yenes en cajeros 7-Eleven o Family Mart. La mayoría aceptan tarjetas extranjeras.</p></div>
           <div class="tip-card"><div class="tip-card-icon">📱</div><h4>Internet</h4><p>Compra una eSIM o alquila pocket WiFi antes de llegar. Google Maps y Google Translate serán tus mejores amigos.</p></div>
           <div class="tip-card"><div class="tip-card-icon">🏮</div><h4>Costumbres</h4><p>Quítate los zapatos al entrar a casas y templos. No des propina. No hables por teléfono en el tren. Haz fila siempre.</p></div>
@@ -135,9 +138,7 @@ function render(citiesArray, allPlaces, globalSettings) {
   `;
 
   // Events
-  document.getElementById('mobile-toggle')?.addEventListener('click', () => {
-    document.getElementById('mobile-menu')?.classList.toggle('open');
-  });
+  bindMobileNav('mobile-toggle', 'mobile-menu');
   window.addEventListener('scroll', () => {
     document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
   });
