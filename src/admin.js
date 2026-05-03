@@ -1,12 +1,82 @@
-import './styles/main.css';
+﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import { getAll, getById, putAll, clear } from './utils/db.js';
+import Sortable from 'sortablejs';
 import { icons } from './utils/helpers.js';
 import { runDataMigration } from './utils/dataMigration.js';
+import { normalizePlaceRecord, PLACE_IMPORT_EXPORT_FIELDS, toImportExportRow } from './utils/placeData.js';
+import { normalizeCityRecord, sortCities } from './utils/cityData.js';
 import * as XLSX from 'xlsx';
 
 const app = document.getElementById('app');
+const PLACE_FIELD_HELP = [
+  '<li><strong>id</strong>: (Texto) Identificador unico en minusculas sin espacios.</li>',
+  '<li><strong>name</strong>: (Texto) Nombre del lugar.</li>',
+  '<li><strong>cityId</strong>: (Texto) ID de la ciudad, por ejemplo <code>tokyo</code>.</li>',
+  '<li><strong>category</strong>: (Texto) Categoria funcional de la actividad.</li>',
+  '<li><strong>type</strong>: (Texto) Tipo descriptivo, por ejemplo <code>Templo</code>.</li>',
+  '<li><strong>priority</strong>: (Texto) <code>must-see</code>, <code>recommended</code> u <code>optional</code>.</li>',
+  '<li><strong>zone</strong>: (Texto) Barrio o zona.</li>',
+  '<li><strong>description</strong>: (Texto) Descripcion principal.</li>',
+  '<li><strong>address</strong>: (Texto) Direccion legible para el usuario.</li>',
+  '<li><strong>lat / lng</strong>: (Numero) Coordenadas decimales usando punto.</li>',
+  '<li><strong>estimatedDuration</strong>: (Texto) Duracion estimada.</li>',
+  '<li><strong>bestTime</strong>: (Opción) <code>mañana</code>, <code>tarde</code>, <code>noche</code> o <code>cualquier-momento</code>.</li>',
+  '<li><strong>rainyFriendly</strong>: (Booleano) <code>true</code>/<code>false</code> o <code>1</code>/<code>0</code>.</li>',
+  '<li><strong>score</strong>: (Numero) Puntuacion unica del chat, de 1 a 10.</li>',
+  '<li><strong>requiresTicket</strong>: (Booleano) Si necesita entrada de pago o reserva.</li>',
+  '<li><strong>ticketInfo</strong>: (Texto) Precio o aclaracion sobre la entrada.</li>',
+  '<li><strong>tips</strong>: (Texto) Consejos practicos.</li>',
+  '<li><strong>comment</strong>: (Texto) Nota personal.</li>',
+  
+].join('');
+const PLANNER_IMPORT_EXPORT_FIELDS = ['placeId', 'favorite', 'status', 'assignedDay', 'order'];
+
+function showInlineMessage(elementId, message, tone = 'success') {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = 'block';
+  el.style.color = tone === 'error' ? '#dc2626' : 'var(--accent)';
+}
+
+function clearInlineMessage(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
+
+function showAdminToast(message, tone = 'success') {
+  let portal = document.getElementById('admin-toast-portal');
+  if (!portal) {
+    portal = document.createElement('div');
+    portal.id = 'admin-toast-portal';
+    portal.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;flex-direction:column;gap:10px;';
+    document.body.appendChild(portal);
+  }
+
+  const toast = document.createElement('div');
+  toast.style.cssText = `min-width:280px;max-width:420px;padding:12px 14px;border-radius:14px;background:${tone === 'error' ? '#7f1d1d' : '#1f2937'};color:white;box-shadow:var(--shadow-xl);font-size:0.9rem;line-height:1.45;`;
+  toast.textContent = message;
+  portal.appendChild(toast);
+
+  window.setTimeout(() => {
+    toast.remove();
+    if (!portal.childElementCount) portal.remove();
+  }, 3200);
+}
+
+function normalizePlannerRecord(item) {
+  return {
+    placeId: String(item?.placeId || '').trim(),
+    favorite: Boolean(item?.favorite),
+    status: item?.status || null,
+    assignedDay: item?.assignedDay == null || item?.assignedDay === '' ? null : Number.parseInt(item.assignedDay, 10),
+    order: item?.order == null || item?.order === '' ? 0 : Number.parseInt(item.order, 10)
+  };
+}
 
 async function boot() {
   await runDataMigration();
@@ -14,7 +84,7 @@ async function boot() {
 }
 
 async function render() {
-  const citiesArray = await getAll('cities');
+  const citiesArray = sortCities(await getAll('cities'));
   const placesArray = await getAll('places');
   const settingsArray = await getAll('settings');
   const globalSettings = settingsArray.find(s => s.id === 'global') || {};
@@ -22,22 +92,22 @@ async function render() {
   app.innerHTML = `
     <nav class="nav" id="main-nav">
       <div class="nav-inner">
-        <a href="/" class="nav-logo">🇯🇵 Japón 2026 <span class="ja">Admin</span></a>
+        <a href="/" class="nav-logo">&#x1F1EF;&#x1F1F5; Jap&oacute;n 2026 <span class="ja">Admin</span></a>
         <div class="nav-links">
           <a href="/">Volver al Inicio</a>
-          ${globalSettings.plannerEnabled ? `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">🗓️ Planner</a>` : ''}
+          
         </div>
       </div>
     </nav>
     <div class="container" style="padding-top: calc(var(--nav-height) + var(--space-xl)); padding-bottom: var(--space-xl);">
       <div class="home-section-title">
-        <h2>⚙️ Panel de Administración</h2>
-        <p>Configuración avanzada, importación y copias de seguridad.</p>
+        <h2>&#x2699;&#xFE0F; Panel de Administraci&oacute;n</h2>
+        <p>Configuraci&oacute;n avanzada, importaci&oacute;n y copias de seguridad.</p>
       </div>
 
       <!-- GLOBAL SETTINGS SECTION -->
       <div class="admin-card" style="margin-bottom: 20px;">
-        <h3>🌍 Configuración del Viaje</h3>
+        <h3>&#x1F30D; Configuraci&oacute;n del viaje</h3>
         <p style="color: var(--text-secondary); margin-bottom: 15px;">Establece las fechas globales de tu viaje para el Planificador ("Mi Ruta").</p>
         <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:flex-end;">
           <div class="form-group" style="margin:0;">
@@ -48,49 +118,60 @@ async function render() {
             <label>Fecha de fin</label>
             <input type="date" id="global-end-date" value="${globalSettings.endDate || ''}" style="padding:8px; border-radius:4px; border:1px solid var(--border);">
           </div>
-          <div class="form-group" style="margin:0; display:flex; align-items:center; gap:8px; padding-top:25px; margin-right: 15px;">
-            <input type="checkbox" id="global-planner-enabled" ${globalSettings.plannerEnabled ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
-            <label for="global-planner-enabled" style="margin:0; font-weight:600; cursor:pointer;">Planificador activado</label>
-          </div>
           <div class="form-group" style="margin:0; min-width: 200px;">
             <label>Estilo de enlaces de Mapa</label>
             <select id="global-map-link-style" style="padding:8px; border-radius:4px; border:1px solid var(--border); width: 100%;">
-              <option value="smart" ${globalSettings.mapLinkStyle === 'smart' || !globalSettings.mapLinkStyle ? 'selected' : ''}>Inteligente (App Nativa / Ficha Google)</option>
-              <option value="coords" ${globalSettings.mapLinkStyle === 'coords' ? 'selected' : ''}>Solo Coordenadas (Modo Clásico)</option>
+              <option value="smart" ${globalSettings.mapLinkStyle === 'smart' || !globalSettings.mapLinkStyle ? 'selected' : ''}>Inteligente (App nativa / ficha Google)</option>
+              <option value="coords" ${globalSettings.mapLinkStyle === 'coords' ? 'selected' : ''}>Solo coordenadas (modo cl&aacute;sico)</option>
             </select>
           </div>
-          <button id="btn-save-settings" class="maps-link-btn" style="background:var(--accent); border:none; cursor:pointer;">💾 Guardar Ajustes</button>
+          <button id="btn-save-settings" class="maps-link-btn" style="background:var(--accent); border:none; cursor:pointer;">&#x1F4BE; Guardar ajustes</button>
         </div>
         <p id="settings-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
       </div>
 
       <!-- BACKUP SECTION -->
       <div class="admin-card">
-        <h3>💾 Copias de Seguridad</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Guarda una copia de todos tus datos (ciudades, lugares y planificación) en un archivo JSON.</p>
+        <h3>&#x1F4BE; Copias de seguridad</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Guarda una copia de todos tus datos (ciudades, lugares y planificaci&oacute;n) en un archivo JSON.</p>
         <div style="display:flex; gap:10px; flex-wrap: wrap;">
-          <button id="btn-export" class="maps-link-btn" style="background:var(--accent);">⬇️ Exportar Backup (JSON)</button>
+          <button id="btn-export" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar backup (JSON)</button>
           
           <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            ⬆️ Restaurar Backup
+            &#x2B06;&#xFE0F; Restaurar backup
             <input type="file" id="input-restore" accept=".json" style="display:none;">
           </label>
         </div>
         <p id="backup-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
       </div>
+      <div class="admin-card" style="margin-top: 20px;">
+        <h3>&#x1F5D3;&#xFE0F; Planificaci&oacute;n y estado</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Exporta o restaura solo el estado del planner. Si el archivo contiene actividades que no existen en esta base de datos, se ignorar&aacute;n y se avisar&aacute; al finalizar.</p>
+        <div style="display:flex; gap:10px; flex-wrap: wrap;">
+          <button id="btn-export-planner-json" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (JSON)</button>
+          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
+            &#x2B06;&#xFE0F; Importar planificaci&oacute;n
+            <input type="file" id="input-planner-restore" accept=".json" style="display:none;">
+          </label>
+        </div>
+        <p id="planner-import-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
+      </div>
 
       <!-- CITIES LIST SECTION -->
       <div class="admin-card" style="margin-top: 20px;">
-        <h3>🏙️ Ciudades Registradas</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Gestiona las ciudades existentes. Haz click en Editar para modificar sus detalles.</p>
-        <div style="display:flex; flex-direction:column; gap:10px;">
+        <h3>&#x1F3D9;&#xFE0F; Ciudades registradas</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Reordena las ciudades arrastrando. Este orden se aplicar&aacute; en la home y en toda la navegaci&oacute;n.</p>
+        <div id="cities-sortable-list" style="display:flex; flex-direction:column; gap:10px;">
           ${citiesArray.map(city => `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; border:1px solid var(--border-light); border-left: 5px solid ${city.color}; border-radius:var(--radius-md); background:var(--bg-primary);">
-              <div>
-                <div style="font-weight:bold;">${city.name} ${city.nameJa ? `<span style="font-size:0.85em; color:var(--text-secondary);">${city.nameJa}</span>` : ''}</div>
-                <div style="font-size:0.85rem; color:var(--text-secondary);">ID: ${city.id} · ${city.recommendedDays} días · ${city.zones.length} zonas</div>
+            <div class="admin-city-row" data-city-id="${city.id}" style="display:flex; justify-content:space-between; align-items:center; padding:12px; border:1px solid var(--border-light); border-left: 5px solid ${city.color}; border-radius:var(--radius-md); background:var(--bg-primary);">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <span class="admin-city-grip" aria-hidden="true">&#x2630;</span>
+                <div>
+                  <div style="font-weight:bold;">${city.name} ${city.nameJa ? `<span style="font-size:0.85em; color:var(--text-secondary);">${city.nameJa}</span>` : ''}</div>
+                  <div style="font-size:0.85rem; color:var(--text-secondary);">ID: ${city.id} &middot; ${city.recommendedDays} d&iacute;as &middot; ${city.zones.length} zonas</div>
+                </div>
               </div>
-              <button class="filter-pill btn-edit-city" data-city-id="${city.id}">✏️ Editar</button>
+              <button class="filter-pill btn-edit-city" data-city-id="${city.id}">&#x270F;&#xFE0F; Editar</button>
             </div>
           `).join('')}
         </div>
@@ -98,18 +179,18 @@ async function render() {
 
       <!-- ADD CITY SECTION -->
       <div class="admin-card" style="margin-top: 20px;">
-        <h3>🏙️ Añadir Nueva Ciudad</h3>
+        <h3>&#x1F3D9;&#xFE0F; A&ntilde;adir nueva ciudad</h3>
         <form id="form-add-city" class="admin-form">
           <div class="form-group">
-            <label>ID (minúsculas, sin espacios. Ej: 'kyoto')</label>
+            <label>ID (min&uacute;sculas, sin espacios. Ej: 'kyoto')</label>
             <input type="text" id="city-id" required>
           </div>
           <div class="form-group">
-            <label>Nombre Público (Ej: 'Kioto')</label>
+            <label>Nombre p&uacute;blico (Ej: 'Kioto')</label>
             <input type="text" id="city-name" required>
           </div>
           <div class="form-group">
-            <label>Nombre Japonés (Ej: '京都')</label>
+            <label>Nombre japon&eacute;s (Ej: '京都')</label>
             <input type="text" id="city-name-ja">
           </div>
           <div class="form-group">
@@ -120,11 +201,11 @@ async function render() {
             </div>
           </div>
           <div class="form-group">
-            <label>Subtítulo (Tagline)</label>
+            <label>Subt&iacute;tulo (tagline)</label>
             <input type="text" id="city-tagline" required>
           </div>
           <div class="form-group">
-            <label>Descripción Principal</label>
+            <label>Descripci&oacute;n principal</label>
             <textarea id="city-description" rows="3" required></textarea>
           </div>
           <div class="form-group">
@@ -137,7 +218,7 @@ async function render() {
           </div>
           <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
             <div style="flex:1;">
-              <label>Días recomendados</label>
+            <label>D&iacute;as recomendados</label>
               <input type="number" id="city-days" min="1" value="3" required style="width:100%;">
             </div>
             <div style="flex:2;">
@@ -160,20 +241,18 @@ async function render() {
       <!-- IMPORT CSV SECTION -->
       <div class="admin-card" style="margin-top: 20px;">
         <h3 style="display:flex; align-items:center; gap:10px;">
-          📥 Importación/Exportación Masiva (Excel)
-          <button id="btn-csv-info" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Ver formato de campos">ℹ️</button>
+          &#x1F4E5; Importaci&oacute;n/Exportaci&oacute;n masiva (Excel)
+          <button id="btn-csv-info" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Ver formato de campos">&#x2139;&#xFE0F;</button>
         </h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Importa actividades desde un archivo Excel (.xlsx) o CSV. Debe incluir cabeceras en la primera fila.</p>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Importa actividades desde un archivo Excel (.xlsx) o CSV. Debe incluir cabeceras en la primera fila y usar valores controlados en el campo bestTime.</p>
         <p style="font-size: 0.8rem; background: var(--bg-secondary); padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-          <strong>Cabeceras obligatorias:</strong> id, name, cityId, category, type, lat, lng<br>
-          <strong>Cabeceras opcionales:</strong> priority, zone, description, estimatedDuration, bestTime, rainyFriendly, score, ticketInfo
-        </p>
+          <strong>Columnas soportadas:</strong> ${PLACE_IMPORT_EXPORT_FIELDS.join(', ')}</p>
         <div style="display:flex; gap:10px; flex-wrap: wrap;">
           <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            ⬆️ Importar Excel/CSV
+            &#x2B06;&#xFE0F; Importar Excel/CSV
             <input type="file" id="input-csv" accept=".xlsx, .xls, .csv" style="display:none;">
           </label>
-          <button id="btn-export-csv" class="maps-link-btn" style="background:var(--accent);">⬇️ Exportar Lugares (Excel)</button>
+          <button id="btn-export-csv" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar lugares (Excel)</button>
         </div>
         <p id="csv-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
       </div>
@@ -211,26 +290,13 @@ function attachEvents() {
   document.getElementById('btn-csv-info').addEventListener('click', () => {
     modal.innerHTML = `
       <div class="modal-header">
-        <h2>ℹ️ Formato de Campos CSV</h2>
-        <button class="modal-close" id="admin-modal-close">✕</button>
+        <h2>&#x2139;&#xFE0F; Formato de campos CSV</h2>
+        <button class="modal-close" id="admin-modal-close">&#x2715;</button>
       </div>
       <div class="modal-body" style="font-size:0.9rem; line-height:1.6;">
-        <p>Al importar o exportar el CSV, asegúrate de utilizar estas columnas exactas en la primera fila:</p>
+        <p>Al importar o exportar el Excel/CSV, utiliza estas columnas exactas en la primera fila:</p>
         <ul style="padding-left:20px; margin-top:10px;">
-          <li><strong>id</strong>: (Texto) Identificador único en minúsculas sin espacios (ej: 'tokyo-tower'). Si lo dejas vacío, se autogenerará.</li>
-          <li><strong>name</strong>: (Texto) Nombre del lugar.</li>
-          <li><strong>cityId</strong>: (Texto) ID de la ciudad a la que pertenece (ej: 'tokyo', 'kyoto').</li>
-          <li><strong>category</strong>: (Opciones exactas) 'cultura', 'comida', 'ocio', 'compras'.</li>
-          <li><strong>type</strong>: (Texto) Tipo descriptivo (ej: 'Templo', 'Mirador', 'Restaurante').</li>
-          <li><strong>priority</strong>: (Opciones exactas) 'must-see' (Imprescindible), 'recommended' (Recomendado), 'optional' (Opcional).</li>
-          <li><strong>zone</strong>: (Texto) Nombre del barrio o zona (ej: 'Shibuya', 'Gion').</li>
-          <li><strong>description</strong>: (Texto) Descripción larga. Evita usar comillas dobles internas si no controlas bien el CSV.</li>
-          <li><strong>lat / lng</strong>: (Números) Coordenadas decimales usando punto (ej: 35.6585).</li>
-          <li><strong>estimatedDuration</strong>: (Texto) Tiempo que suele llevar la visita (ej: '1h 30m').</li>
-          <li><strong>bestTime</strong>: (Opciones exactas) 'mañana', 'tarde', 'noche' o dejar vacío para 'Cualquier momento'.</li>
-          <li><strong>rainyFriendly</strong>: (Booleano) 'true' o '1' si se puede visitar lloviendo, 'false' o '0' si no.</li>
-          <li><strong>score</strong>: (Número) Puntuación del 0.0 al 10.0 usando punto (ej: 9.5).</li>
-          <li><strong>ticketInfo</strong>: (Texto) Precio o texto informativo (ej: '1200¥', 'Gratis').</li>
+          ${PLACE_FIELD_HELP}
         </ul>
       </div>
     `;
@@ -254,22 +320,25 @@ function attachEvents() {
   document.getElementById('btn-save-settings').addEventListener('click', async () => {
     const start = document.getElementById('global-start-date').value;
     const end = document.getElementById('global-end-date').value;
-    const plannerEnabled = document.getElementById('global-planner-enabled').checked;
     const mapLinkStyle = document.getElementById('global-map-link-style').value;
-    await putAll('settings', [{ id: 'global', startDate: start, endDate: end, plannerEnabled, mapLinkStyle }]);
-    
-    const msg = document.getElementById('settings-msg');
-    msg.textContent = '✅ Ajustes actualizados correctamente.';
-    msg.style.display = 'block';
-    setTimeout(() => { msg.style.display = 'none'; }, 3000);
+    clearInlineMessage('settings-msg');
+
+    if (start && end && end < start) {
+      showInlineMessage('settings-msg', 'La fecha de fin debe ser posterior o igual a la fecha de inicio.', 'error');
+      return;
+    }
+
+    await putAll('settings', [{ id: 'global', startDate: start, endDate: end, mapLinkStyle }]);
+    showInlineMessage('settings-msg', 'Ajustes actualizados correctamente.');
+    setTimeout(() => { clearInlineMessage('settings-msg'); }, 3000);
   });
 
   // Export JSON
   document.getElementById('btn-export').addEventListener('click', async () => {
     const data = {
-      cities: await getAll('cities'),
-      places: await getAll('places'),
-      planner: await getAll('planner')
+      cities: sortCities(await getAll('cities')).map((city, index) => normalizeCityRecord(city, index)),
+      places: (await getAll('places')).map((place) => normalizePlaceRecord(place)),
+      planner: (await getAll('planner')).map((item) => normalizePlannerRecord(item))
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -277,6 +346,7 @@ function attachEvents() {
     a.href = url;
     a.download = `japon2026_backup_${new Date().toISOString().slice(0,10)}.json`;
     a.click();
+    URL.revokeObjectURL(url);
   });
 
   // Import JSON
@@ -291,26 +361,89 @@ function attachEvents() {
           await clear('cities');
           await clear('places');
           await clear('planner');
-          
-          await putAll('cities', data.cities);
-          await putAll('places', data.places);
-          if (data.planner) await putAll('planner', data.planner);
-          
+          await putAll('cities', sortCities(data.cities).map((city, index) => normalizeCityRecord(city, index)));
+          await putAll('places', data.places.map((place) => normalizePlaceRecord(place)));
+          if (data.planner) await putAll('planner', data.planner.map((item) => normalizePlannerRecord(item)).filter((item) => item.placeId));
           alert('Backup restaurado con éxito. Recargando...');
           window.location.reload();
         } else {
-          alert('Archivo JSON no válido.');
+          alert('Archivo JSON no valido.');
         }
       } catch (err) {
         alert('Error al leer el JSON: ' + err.message);
+      } finally {
+        e.target.value = '';
       }
     };
     reader.readAsText(file);
   });
 
+  document.getElementById('btn-export-planner-json')?.addEventListener('click', async () => {
+    const plannerData = (await getAll('planner'))
+      .map((item) => normalizePlannerRecord(item))
+      .filter((item) => item.placeId)
+      .map((item) => {
+        const normalized = {};
+        PLANNER_IMPORT_EXPORT_FIELDS.forEach((field) => {
+          normalized[field] = item[field] ?? null;
+        });
+        return normalized;
+      });
+    const blob = new Blob([JSON.stringify({ planner: plannerData }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `japon2026_planner_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showInlineMessage('planner-import-msg', 'Planificacion exportada correctamente.');
+    setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
+  });
+
+  document.getElementById('input-planner-restore')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        clearInlineMessage('planner-import-msg');
+        const payload = JSON.parse(ev.target.result);
+        const plannerRows = Array.isArray(payload) ? payload : payload?.planner;
+        if (!Array.isArray(plannerRows)) {
+          showInlineMessage('planner-import-msg', 'Archivo de planificacion no valido.', 'error');
+          return;
+        }
+        const existingPlaces = await getAll('places');
+        const existingIds = new Set(existingPlaces.map((place) => place.id));
+        const byPlaceId = new Map();
+        let skipped = 0;
+        plannerRows.forEach((row) => {
+          const item = normalizePlannerRecord(row);
+          if (!item.placeId || !existingIds.has(item.placeId)) {
+            skipped += 1;
+            return;
+          }
+          byPlaceId.set(item.placeId, item);
+        });
+        await clear('planner');
+        const validItems = Array.from(byPlaceId.values());
+        if (validItems.length) await putAll('planner', validItems);
+        showInlineMessage('planner-import-msg', `Planificacion importada correctamente (${validItems.length} actividades).`);
+        if (skipped > 0) {
+          showAdminToast(`Se han ignorado ${skipped} actividades porque no existen en la base de datos actual.`, 'error');
+        }
+      } catch (err) {
+        showInlineMessage('planner-import-msg', `Error al leer la planificacion: ${err.message}`, 'error');
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  });
   // Add City
   document.getElementById('form-add-city').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const existingCities = sortCities(await getAll('cities')); 
     const coordsStr = document.getElementById('city-center').value.split(',');
     const lat = parseFloat(coordsStr[0]);
     const lng = parseFloat(coordsStr[1]);
@@ -335,11 +468,12 @@ function attachEvents() {
       zones: zones.length > 0 ? zones : ["Centro"],
       highlights: highlights,
       center: [lat || 0, lng || 0],
-      defaultZoom: 13
+      defaultZoom: 13,
+      sortOrder: (existingCities.at(-1)?.sortOrder ?? -1) + 1
     };
 
-    await putAll('cities', [newCity]);
-    alert('Ciudad añadida con éxito');
+    await putAll('cities', [normalizeCityRecord(newCity, newCity.sortOrder)]);
+        alert('Ciudad añadida con éxito');
     render();
   });
 
@@ -377,17 +511,12 @@ function attachEvents() {
               try { val = JSON.parse(val); } catch(e) {}
             }
 
-            // Convert specific types
-            if (h === 'lat' || h === 'lng') val = parseFloat(val);
-            if (h === 'score' && typeof val !== 'object') val = parseFloat(val);
-            if (h === 'rainyFriendly') val = val === 'true' || val === 'TRUE' || val === 1 || val === true;
-            if (h === 'priority' && !val) val = 'optional';
-            
             obj[h] = val;
           });
 
-          if (obj.id && obj.cityId) {
-            validPlaces.push(obj);
+          if (obj.id && obj.cityId && obj.name) {
+            if (!obj.priority) obj.priority = 'optional';
+            validPlaces.push(normalizePlaceRecord(obj));
           }
         }
 
@@ -418,25 +547,8 @@ function attachEvents() {
       return;
     }
 
-    const headers = [
-      'id', 'name', 'cityId', 'category', 'type', 'priority', 'zone', 
-      'description', 'lat', 'lng', 'estimatedDuration', 'bestTime', 
-      'rainyFriendly', 'score', 'ticketInfo'
-    ];
-
-    const data = places.map(place => {
-      const row = {};
-      headers.forEach(h => {
-        let val = place[h];
-        if (typeof val === 'object' && val !== null) {
-          val = JSON.stringify(val);
-        }
-        row[h] = val;
-      });
-      return row;
-    });
-
-    const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
+    const data = places.map((place) => toImportExportRow(place));
+    const worksheet = XLSX.utils.json_to_sheet(data, { header: PLACE_IMPORT_EXPORT_FIELDS });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Lugares');
     
@@ -456,8 +568,8 @@ function attachEvents() {
 
       modal.innerHTML = `
         <div class="modal-header">
-          <h2>✏️ Editar Ciudad: ${city.name}</h2>
-          <button class="modal-close" id="admin-modal-close">✕</button>
+          <h2>&#x270F;&#xFE0F; Editar ciudad: ${city.name}</h2>
+          <button class="modal-close" id="admin-modal-close">&#x2715;</button>
         </div>
         <div class="modal-body">
           <form id="form-edit-city" class="admin-form">
@@ -466,11 +578,11 @@ function attachEvents() {
               <input type="text" id="edit-city-id" value="${city.id}" readonly style="background:#eee; cursor:not-allowed;">
             </div>
             <div class="form-group">
-              <label>Nombre Público</label>
+              <label>Nombre p&uacute;blico</label>
               <input type="text" id="edit-city-name" value="${city.name}" required>
             </div>
             <div class="form-group">
-              <label>Nombre Japonés</label>
+              <label>Nombre japon&eacute;s</label>
               <input type="text" id="edit-city-name-ja" value="${city.nameJa || ''}">
             </div>
             <div class="form-group">
@@ -481,11 +593,11 @@ function attachEvents() {
               </div>
             </div>
             <div class="form-group">
-              <label>Subtítulo (Tagline)</label>
+              <label>Subt&iacute;tulo (tagline)</label>
               <input type="text" id="edit-city-tagline" value="${city.tagline || ''}" required>
             </div>
             <div class="form-group">
-              <label>Descripción Principal</label>
+              <label>Descripci&oacute;n principal</label>
               <textarea id="edit-city-description" rows="3" required>${city.description || ''}</textarea>
             </div>
             <div class="form-group">
@@ -498,7 +610,7 @@ function attachEvents() {
             </div>
             <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
               <div style="flex:1;">
-                <label>Días recomendados</label>
+                <label>D&iacute;as recomendados</label>
                 <input type="number" id="edit-city-days" min="1" value="${parseInt(city.recommendedDays) || 3}" required style="width:100%;">
               </div>
               <div style="flex:2;">
@@ -560,7 +672,7 @@ function attachEvents() {
           center: [lat || 0, lng || 0]
         };
 
-        await putAll('cities', [updatedCity]);
+        await putAll('cities', [normalizeCityRecord(updatedCity, city.sortOrder ?? 999)]);
         alert('Ciudad actualizada con éxito');
         modalOverlay.classList.remove('open');
         document.body.style.overflow = '';
@@ -568,6 +680,25 @@ function attachEvents() {
       });
     });
   });
+  const citiesSortableList = document.getElementById('cities-sortable-list');
+  if (citiesSortableList) {
+    Sortable.create(citiesSortableList, {
+      animation: 180,
+      ghostClass: 'sortable-ghost',
+      handle: '.admin-city-grip',
+      onEnd: async () => {
+        const currentCities = sortCities(await getAll('cities'));
+        const byId = new Map(currentCities.map((city) => [city.id, city]));
+        const reordered = Array.from(citiesSortableList.querySelectorAll('.admin-city-row'))
+          .map((row, index) => normalizeCityRecord({ ...byId.get(row.dataset.cityId), sortOrder: index }, index))
+          .filter((city) => city.id);
+        await putAll('cities', reordered);
+        showAdminToast('Orden de ciudades actualizado.');
+        render();
+      }
+    });
+  }
 }
 
- boot();
+boot();
+

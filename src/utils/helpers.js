@@ -1,3 +1,5 @@
+﻿import { normalizeBestTimeValue, normalizeScoreValue } from './placeData.js';
+
 export const icons = {
   search: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>`,
   heart: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z"/></svg>`,
@@ -15,11 +17,9 @@ export const icons = {
 };
 
 export function formatScore(score) {
-  if (!score) return null;
-  const parts = [];
-  if (score.chat) parts.push(`${score.chat}/10`);
-  if (score.laura) parts.push(`${score.laura}/10`);
-  return parts.join(' · ') || null;
+  const normalized = normalizeScoreValue(score);
+  if (normalized == null) return null;
+  return `${normalized}/10`;
 }
 
 export function debounce(fn, delay = 300) {
@@ -28,9 +28,9 @@ export function debounce(fn, delay = 300) {
 }
 
 export function getTimeIcon(timeStr) {
-  if (!timeStr) return '☀️';
-  const lower = timeStr.toLowerCase();
-  if (lower.includes('noche') || lower.includes('nocturno')) return '🌙';
-  if (lower.includes('tarde') || lower.includes('atardecer')) return '🌇';
-  return '☀️';
+  const normalized = normalizeBestTimeValue(timeStr);
+  if (normalized === 'noche') return '\u{1F319}';
+  if (normalized === 'tarde') return '\u{1F307}';
+  return '\u2600\uFE0F';
 }
+

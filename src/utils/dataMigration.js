@@ -3,9 +3,12 @@ import { tokyoPlaces } from '../data/tokyo.js';
 import { kyotoPlaces } from '../data/kyoto.js';
 import { osakaPlaces } from '../data/osaka.js';
 import { getAll, putAll, getById } from './db.js';
+import { normalizePlaceRecord } from './placeData.js';
+import { normalizeCityRecord } from './cityData.js';
 
 export async function runDataMigration() {
   const existingCities = await getAll('cities');
+  const existingPlaces = await getAll('places');
   
   // If DB already has cities, we don't migrate (assume user data is there)
   // But for development, we might want to force update.
@@ -14,14 +17,14 @@ export async function runDataMigration() {
     console.log('Running initial data migration to IndexedDB...');
     
     // Convert cities object to array
-    const citiesArray = Object.values(cities);
+    const citiesArray = Object.values(cities).map((city, index) => normalizeCityRecord(city, index));
     await putAll('cities', citiesArray);
     
     // Unify all places, adding cityId
     const allPlaces = [
-      ...tokyoPlaces.map(p => ({ ...p, cityId: 'tokyo', rainyFriendly: !!p.rainyFriendly })),
-      ...kyotoPlaces.map(p => ({ ...p, cityId: 'kyoto', rainyFriendly: !!p.rainyFriendly })),
-      ...osakaPlaces.map(p => ({ ...p, cityId: 'osaka', rainyFriendly: !!p.rainyFriendly }))
+      ...tokyoPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'tokyo' })),
+      ...kyotoPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'kyoto' })),
+      ...osakaPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'osaka' }))
     ];
     await putAll('places', allPlaces);
     
@@ -38,5 +41,42 @@ export async function runDataMigration() {
     }
     
     console.log('Migration complete!');
+  }
+
+  if (existingPlaces.length > 0) {
+    const normalizedPlaces = existingPlaces.map((place) => normalizePlaceRecord(place));
+    const needsNormalization = normalizedPlaces.some((place, index) => {
+      const current = existingPlaces[index];
+      const currentScore = current?.score;
+      const hasLegacyScore = currentScore && typeof currentScore === 'object';
+      const latMismatch = (current?.coordinates?.lat ?? null) !== (place.coordinates?.lat ?? null);
+      const lngMismatch = (current?.coordinates?.lng ?? null) !== (place.coordinates?.lng ?? null);
+      const bestTimeMismatch = current?.bestTime !== place.bestTime;
+      const hasLegacySource = Object.prototype.hasOwnProperty.call(current || {}, 'source');
+      return hasLegacyScore
+        || current?.score !== place.score
+        || current?.rainyFriendly !== place.rainyFriendly
+        || current?.requiresTicket !== place.requiresTicket
+        || bestTimeMismatch
+        || hasLegacySource
+        || latMismatch
+        || lngMismatch;
+    });
+
+    if (needsNormalization) {
+      await putAll('places', normalizedPlaces);
+    }
+  }
+
+  if (existingCities.length > 0) {
+    const normalizedCities = existingCities.map((city, index) => normalizeCityRecord(city, index));
+    const needsCityNormalization = normalizedCities.some((city, index) => {
+      const current = existingCities[index];
+      return current?.sortOrder !== city.sortOrder;
+    });
+
+    if (needsCityNormalization) {
+      await putAll('cities', normalizedCities);
+    }
   }
 }

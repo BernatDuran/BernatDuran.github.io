@@ -1,4 +1,4 @@
-/* === PAGE-SPECIFIC STYLES === */
+﻿/* === PAGE-SPECIFIC STYLES === */
 
 /* --- Home Hero --- */
 .home-hero { min-height: 85vh; display: flex; align-items: center; justify-content: center; text-align: center; position: relative; background: var(--primary); color: var(--text-inverse); overflow: hidden; padding: var(--space-4xl) var(--space-md); }
@@ -122,5 +122,6 @@ body { padding-top: var(--nav-height); }
 .admin-form { display: flex; flex-direction: column; gap: var(--space-md); }
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 .form-group label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
-.form-group input { padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius-md); font-family: inherit; }
-.form-group input:focus { outline: none; border-color: var(--accent); }
+.form-group input, .form-group select, .form-group textarea { padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius-md); font-family: inherit; background: var(--bg-card); }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
+
