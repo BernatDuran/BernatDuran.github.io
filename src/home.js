@@ -16,14 +16,14 @@ async function init() {
   const dbCities = sortCities(await getAll('cities'));
   const dbPlaces = await getAll('places');
   const settingsArray = await getAll('settings') || [];
-  const globalSettings = settingsArray.find(s => s.id === 'global') || {};
+  const globalSettings = settingsArray.find((s) => s.id === 'global') || {};
   render(dbCities, dbPlaces, globalSettings);
 }
 
 function render(citiesArray, allPlaces, globalSettings) {
   const totalPlaces = allPlaces.length;
   const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
-  const cityLinks = citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('');
+  const cityLinks = citiesArray.map((city) => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('');
 
   const startDateStr = globalSettings?.startDate || '2026-06-30';
   const endDateStr = globalSettings?.endDate || '2026-07-16';
@@ -52,7 +52,7 @@ function render(citiesArray, allPlaces, globalSettings) {
           <a href="/admin.html" class="nav-tool-btn" title="Admin">⚙️</a>
           ${renderMobileMenu('mobile-toggle', 'mobile-menu', `
             <a href="/" class="active">Inicio</a>
-            ${citiesArray.map(city => `<a href="/city.html?id=${city.id}">${city.name} ${city.nameJa || ''}</a>`).join('')}
+            ${citiesArray.map((city) => `<a href="/city.html?id=${city.id}">${city.name} ${city.nameJa || ''}</a>`).join('')}
             ${plannerLink}
           `)}
         </div>
@@ -79,7 +79,6 @@ function render(citiesArray, allPlaces, globalSettings) {
 
     <section style="padding: 2rem 0 1rem 0;">
       <div class="container">
-        <!-- Countdown -->
         <div id="countdown-wrapper" style="text-align: center; margin-bottom: 2rem;" class="animate-fade-in-up">
           <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px;">Comienza la aventura en</div>
           <div id="countdown-timer" style="display: flex; justify-content: center; gap: 12px; font-family: monospace; font-size: 2.5rem; font-weight: bold; color: var(--accent); line-height: 1;">
@@ -109,7 +108,7 @@ function render(citiesArray, allPlaces, globalSettings) {
           <p>Tres ciudades, tres personalidades, una aventura inolvidable</p>
         </div>
         <div class="city-cards">
-          ${citiesArray.map(city => renderCityCard(city, allPlaces)).join('')}
+          ${citiesArray.map((city) => renderCityCard(city, allPlaces)).join('')}
         </div>
       </div>
     </section>
@@ -137,21 +136,20 @@ function render(citiesArray, allPlaces, globalSettings) {
     </footer>
   `;
 
-  // Events
   bindMobileNav('mobile-toggle', 'mobile-menu');
   window.addEventListener('scroll', () => {
     document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
   });
 
-  // Observer for animations
   const observer = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) e.target.style.animationPlayState = 'running'; });
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) entry.target.style.animationPlayState = 'running';
+    });
   }, { threshold: 0.1 });
-  document.querySelectorAll('.animate-fade-in-up').forEach(el => observer.observe(el));
+  document.querySelectorAll('.animate-fade-in-up').forEach((el) => observer.observe(el));
 
-  // Countdown Logic
-  const targetDate = new Date(2026, 5, 28, 22, 35, 0).getTime(); // June 28, 2026 22:35:00
-  
+  const targetDate = new Date(2026, 5, 28, 22, 35, 0).getTime();
+
   function updateCountdown() {
     const now = new Date().getTime();
     const distance = targetDate - now;
@@ -181,16 +179,16 @@ function render(citiesArray, allPlaces, globalSettings) {
   updateCountdown();
   setInterval(updateCountdown, 1000);
 
-  // Register PWA Service Worker
   if ('serviceWorker' in navigator) {
     registerSW({ immediate: true });
   }
 }
 
 function renderCityCard(city, allPlaces) {
-  const cityPlaces = allPlaces.filter(p => p.cityId === city.id);
+  const cityPlaces = allPlaces.filter((p) => p.cityId === city.id);
   const count = cityPlaces.length;
-  const mustSee = cityPlaces.filter(p => p.priority === 'must-see').length;
+  const mustSee = cityPlaces.filter((p) => p.priority === 'must-see').length;
+
   return `<a href="/city.html?id=${city.id}" class="city-card animate-fade-in-up" style="--city-color: ${city.color}">
     <div class="city-card-hero" style="background: ${city.gradient};">
       <div class="city-card-hero-content">
@@ -207,7 +205,7 @@ function renderCityCard(city, allPlaces) {
         <div class="city-card-stat">📅 <strong>${formatRecommendedDays(city.recommendedDays)}</strong></div>
       </div>
       <div class="city-card-highlights">
-        ${(city.highlights || []).map(h => `<span>${h}</span>`).join('')}
+        ${(city.highlights || []).map((h) => `<span>${h}</span>`).join('')}
       </div>
       <div class="city-card-cta" style="color: ${city.color};">
         Explorar ${city.name} ${icons.arrowRight}

@@ -2,14 +2,14 @@ import { icons } from './helpers.js';
 
 export function renderMobileMenu(toggleId, menuId, linksHtml) {
   return `
-    <button class="nav-mobile-toggle" id="${toggleId}" type="button" aria-expanded="false" aria-controls="${menuId}" aria-label="Abrir menu de navegacion">
+    <button class="nav-mobile-toggle" id="${toggleId}" type="button" aria-expanded="false" aria-controls="${menuId}" aria-label="Abrir menú de navegación">
       <span class="nav-mobile-toggle-icon">${icons.menu}</span>
     </button>
     <div class="nav-mobile-backdrop" id="${menuId}-backdrop" hidden></div>
     <div class="nav-mobile-menu" id="${menuId}" aria-hidden="true">
       <div class="nav-mobile-menu-header">
-        <span class="nav-mobile-menu-title">Navegacion</span>
-        <button class="nav-mobile-close" id="${menuId}-close" type="button" aria-label="Cerrar menu">
+        <span class="nav-mobile-menu-title">Navegación</span>
+        <button class="nav-mobile-close" id="${menuId}-close" type="button" aria-label="Cerrar menú">
           ${icons.close}
         </button>
       </div>
@@ -64,7 +64,7 @@ export function bindMobileNav(toggleId = 'mobile-toggle', menuId = 'mobile-menu'
           openMenu.classList.remove('open');
           openMenu.setAttribute('aria-hidden', 'true');
         });
-        document.querySelectorAll('.nav-mobile-toggle[aria-expanded=\"true\"]').forEach((openToggle) => {
+        document.querySelectorAll('.nav-mobile-toggle[aria-expanded="true"]').forEach((openToggle) => {
           openToggle.setAttribute('aria-expanded', 'false');
           const iconHost = openToggle.querySelector('.nav-mobile-toggle-icon');
           if (iconHost) iconHost.innerHTML = icons.menu;
