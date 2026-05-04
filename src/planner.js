@@ -344,7 +344,8 @@ function getFilteredPlannerPlaces() {
         place.zone,
         place.type,
         category?.label,
-        cityName
+        cityName,
+        place.comment
       ].filter(Boolean).join(' ').toLowerCase();
 
       if (!haystack.includes(searchQuery)) return false;
@@ -634,7 +635,7 @@ function renderModal(place) {
     closeButtonId: 'planner-modal-close',
     showEditButton: false,
     mapContainerId: `modal-map-${place.id}`,
-    commentLabel: 'Nota personal'
+    commentLabel: 'Comentarios'
   });
 }
 

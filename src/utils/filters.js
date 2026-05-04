@@ -54,7 +54,8 @@ export function filterPlaces(
         || p.description.toLowerCase().includes(q)
         || p.zone.toLowerCase().includes(q)
         || p.type.toLowerCase().includes(q)
-        || p.category.toLowerCase().includes(q);
+        || p.category.toLowerCase().includes(q)
+        || (p.comment || '').toLowerCase().includes(q);
       if (!match) return false;
     }
     if (category && p.category !== category) return false;

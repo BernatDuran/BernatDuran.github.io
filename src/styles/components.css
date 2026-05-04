@@ -1,7 +1,7 @@
 ﻿/* === COMPONENT STYLES === */
 
 /* --- Navigation --- */
-.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; background: rgba(250,250,247,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid var(--border-light); height: var(--nav-height); transition: var(--transition-base); }
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 1200; background: rgba(250,250,247,0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid var(--border-light); height: var(--nav-height); transition: var(--transition-base); }
 .nav.scrolled { box-shadow: var(--shadow-sm); }
 .nav-inner { max-width: var(--container-max); margin: 0 auto; padding: 0 var(--space-md); height: 100%; display: flex; align-items: center; justify-content: space-between; }
 .nav-logo { font-family: var(--font-heading); font-weight: 700; font-size: 1.25rem; display: flex; align-items: center; gap: var(--space-sm); }
@@ -19,8 +19,8 @@
 .nav-mobile-toggle:hover { background: var(--border-light); }
 .nav-mobile-toggle svg, .nav-mobile-close svg { width: 22px; height: 22px; }
 .nav-mobile-toggle-icon { display: inline-flex; align-items: center; justify-content: center; }
-.nav-mobile-backdrop { position: fixed; inset: var(--nav-height) 0 0 0; background: rgba(15, 23, 42, 0.32); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); z-index: 98; }
-.nav-mobile-menu { display: none; position: fixed; top: calc(var(--nav-height) + 10px); left: 12px; right: 12px; background: #fffdfa; padding: var(--space-md); z-index: 99; border-radius: var(--radius-xl); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--shadow-xl); max-height: calc(100vh - var(--nav-height) - 24px); overflow-y: auto; }
+.nav-mobile-backdrop { position: fixed; inset: var(--nav-height) 0 0 0; background: rgba(15, 23, 42, 0.32); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); z-index: 1198; }
+.nav-mobile-menu { display: none; position: fixed; top: calc(var(--nav-height) + 10px); left: 12px; right: 12px; background: #fffdfa; padding: var(--space-md); z-index: 1199; border-radius: var(--radius-xl); border: 1px solid rgba(15, 23, 42, 0.08); box-shadow: var(--shadow-xl); max-height: calc(100vh - var(--nav-height) - 24px); overflow-y: auto; }
 .nav-mobile-menu.open { display: flex; flex-direction: column; gap: var(--space-md); animation: fadeIn 0.2s ease; }
 .nav-mobile-menu-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); padding-bottom: var(--space-sm); border-bottom: 1px solid var(--border-light); }
 .nav-mobile-menu-title { font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); }
@@ -145,7 +145,7 @@ body.nav-mobile-open { overflow: hidden; }
 .clear-filters { font-size: 0.74rem; color: var(--accent); font-weight: 500; text-decoration: underline; cursor: pointer; }
 
 /* --- Sticky Filters --- */
-.filters-section { position: sticky; top: var(--nav-height); z-index: 100; background: rgba(250,250,247,0.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); padding: 12px 0; border-bottom: 1px solid var(--border-light); }
+.filters-section { position: sticky; top: var(--nav-height); z-index: 1100; background: rgba(250,250,247,0.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); padding: 12px 0; border-bottom: 1px solid var(--border-light); }
 .filters-inner { max-width: var(--container-max); margin: 0 auto; padding: 0 var(--space-md); display: flex; flex-direction: column; gap: 10px; }
 .filters-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .filters-row-search { justify-content: space-between; }
@@ -154,7 +154,7 @@ body.nav-mobile-open { overflow: hidden; }
 .filter-soft-separator { color: rgba(15, 23, 42, 0.22); }
 
 /* --- Place Modal --- */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; opacity: 0; visibility: hidden; transition: var(--transition-base); display: flex; align-items: flex-end; justify-content: center; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; opacity: 0; visibility: hidden; transition: var(--transition-base); display: flex; align-items: flex-end; justify-content: center; }
 .modal-overlay.open { opacity: 1; visibility: visible; }
 .modal { --modal-max-height: 90vh; background: var(--bg-primary); border-radius: var(--radius-xl) var(--radius-xl) 0 0; max-height: var(--modal-max-height); width: 100%; max-width: 640px; overflow: hidden; transform: translateY(100%); transition: var(--transition-slow); }
 .modal-overlay.open .modal { transform: translateY(0); }
@@ -374,9 +374,13 @@ body.nav-mobile-open { overflow: hidden; }
 .planner-map-legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
 .planner-map-content-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: var(--space-md); align-items: stretch; }
-.planner-map-shell { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.planner-map-shell { position: relative; z-index: 0; isolation: isolate; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .planner-map-container { width: 100%; min-height: 520px; }
 .planner-map-container.is-hidden { display: none; }
+.planner-map-shell .leaflet-pane,
+.planner-map-shell .leaflet-top,
+.planner-map-shell .leaflet-bottom,
+.planner-map-shell .leaflet-control-container { z-index: auto; }
 .planner-map-empty { padding: var(--space-xl); color: var(--text-secondary); font-size: 0.9rem; text-align: center; }
 .planner-map-segments-card { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--space-md); min-height: 0; }
 .planner-map-segments-card h4 { font-size: 0.95rem; margin-bottom: var(--space-sm); }

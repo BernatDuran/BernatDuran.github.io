@@ -536,7 +536,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       editButtonId: 'edit-place-btn',
       showEditButton: true,
       mapContainerId: `modal-map-${place.id}`,
-      commentLabel: 'Nota personal'
+      commentLabel: 'Comentarios'
     });
   }
 
@@ -570,7 +570,8 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     const lngValue = formLatLng?.lng ?? '';
     const generatedId = isEdit ? formPlace.id : buildAutoPlaceId(formPlace.name, formPlace.id);
 
-    return `<div class="modal-handle"></div>
+    return `<div class="modal-scroll">
+      <div class="modal-handle"></div>
       <div class="modal-header">
         <div>
           <h2 style="margin-bottom:4px;">${isEdit ? 'Editar actividad' : 'Nueva actividad'}</h2>
@@ -600,7 +601,8 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
           <p id="place-form-error" style="display:none; color:#dc2626; font-weight:600; margin-bottom:12px;"></p>
           <button type="submit" class="maps-link-btn" style="width:100%; justify-content:center;">${isEdit ? 'Guardar cambios' : 'Crear actividad'}</button>
         </form>
-      </div>`;
+      </div>
+    </div>`;
   }
 
   function openPlaceForm(place = null) {

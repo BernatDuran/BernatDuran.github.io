@@ -14,7 +14,7 @@ export function renderPlaceDetailModal({
   editButtonId = 'edit-place-btn',
   showEditButton = true,
   mapContainerId = '',
-  commentLabel = 'Comentario personal'
+  commentLabel = 'Comentarios'
 }) {
   return `<div class="modal-scroll">
     <div class="modal-handle"></div>
@@ -42,6 +42,7 @@ export function renderPlaceDetailModal({
       </div>
       <div class="modal-section"><div class="modal-section-title">Descripci&oacute;n</div><p style="line-height:1.7;">${place.description}</p></div>
       ${place.tips ? `<div class="modal-section"><div class="modal-section-title">Consejos pr&aacute;cticos</div><div class="modal-tip">${place.tips}</div></div>` : ''}
+      ${place.comment ? `<div class="modal-section"><div class="modal-section-title">${commentLabel}</div><div class="modal-comment">${place.comment}</div></div>` : ''}
       <div class="modal-section"><div class="modal-section-title">Informaci&oacute;n &uacute;til</div>
       <div class="modal-info-grid">
         <div class="modal-info-item"><span class="modal-info-label">&#x1F4CD; Zona</span><span class="modal-info-value">${place.zone || 'Pendiente'}</span></div>
@@ -52,7 +53,6 @@ export function renderPlaceDetailModal({
         ${place.ticketInfo ? `<div class="modal-info-item"><span class="modal-info-label">&#x1F3AB; Entrada</span><span class="modal-info-value">${place.ticketInfo}</span></div>` : ''}
       </div></div>
       ${place.address ? `<div class="modal-section"><div class="modal-section-title">Direcci&oacute;n</div><div class="modal-address">${googleMapsUrl ? `<a href="${googleMapsUrl}" target="_blank" class="address-link">${place.address}</a>` : place.address}</div></div>` : ''}
-      ${place.comment ? `<div class="modal-section"><div class="modal-section-title">${commentLabel}</div><div class="modal-comment">${place.comment}</div></div>` : ''}
       ${mapContainerId ? `<div id="${mapContainerId}" class="modal-map"></div>` : ''}
     </div>
   </div>`;
