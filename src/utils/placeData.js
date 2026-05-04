@@ -111,12 +111,22 @@ export function formatBestTimeLabel(value) {
   return BEST_TIME_LABELS[normalizeBestTimeValue(value)] || 'Cualquier momento';
 }
 
+export function getPlaceLatLng(place) {
+  const parseCoordinate = (value) => (value === '' || value == null ? null : Number.parseFloat(value));
+  const lat = parseCoordinate(place?.lat);
+  const lng = parseCoordinate(place?.lng);
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+
+  const legacyLat = parseCoordinate(place?.coordinates?.lat);
+  const legacyLng = parseCoordinate(place?.coordinates?.lng);
+
+  return Number.isFinite(legacyLat) && Number.isFinite(legacyLng) ? { lat: legacyLat, lng: legacyLng } : null;
+}
+
 export function normalizePlaceRecord(place) {
-  const { source: _legacySource, ...rest } = place || {};
-  const latSource = rest?.lat ?? rest?.coordinates?.lat;
-  const lngSource = rest?.lng ?? rest?.coordinates?.lng;
-  const lat = latSource === '' || latSource == null ? null : Number.parseFloat(latSource);
-  const lng = lngSource === '' || lngSource == null ? null : Number.parseFloat(lngSource);
+  const { source: _legacySource, coordinates: _legacyCoordinates, ...rest } = place || {};
+  const latLng = getPlaceLatLng(place);
   const rainyFriendly = normalizeBoolean(rest?.rainyFriendly);
   const requiresTicket = normalizeBoolean(rest?.requiresTicket);
 
@@ -136,9 +146,8 @@ export function normalizePlaceRecord(place) {
     ticketInfo: repairMojibakeText(rest?.ticketInfo || '') || null,
     tips: repairMojibakeText(rest?.tips || '') || null,
     comment: repairMojibakeText(rest?.comment || '') || null,
-    lat: Number.isFinite(lat) ? lat : null,
-    lng: Number.isFinite(lng) ? lng : null,
-    coordinates: Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+    lat: latLng?.lat ?? null,
+    lng: latLng?.lng ?? null
   };
 }
 

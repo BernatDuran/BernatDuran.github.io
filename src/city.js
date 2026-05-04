@@ -9,7 +9,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { getById, getAll, putAll } from './utils/db.js';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { formatRecommendedDays, sortCities } from './utils/cityData.js';
-import { BEST_TIME_OPTIONS, formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
+import { BEST_TIME_OPTIONS, formatBestTimeLabel, getPlaceLatLng, normalizePlaceRecord } from './utils/placeData.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 // Register PWA Service Worker
@@ -565,8 +565,9 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       comment: ''
     };
 
-    const latValue = formPlace.lat ?? formPlace.coordinates?.lat ?? '';
-    const lngValue = formPlace.lng ?? formPlace.coordinates?.lng ?? '';
+    const formLatLng = getPlaceLatLng(formPlace);
+    const latValue = formLatLng?.lat ?? '';
+    const lngValue = formLatLng?.lng ?? '';
     const generatedId = isEdit ? formPlace.id : buildAutoPlaceId(formPlace.name, formPlace.id);
 
     return `<div class="modal-handle"></div>

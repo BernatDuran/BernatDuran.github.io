@@ -1,9 +1,7 @@
-import { cities } from '../data/cities.js';
-import { tokyoPlaces } from '../data/tokyo.js';
-import { kyotoPlaces } from '../data/kyoto.js';
-import { osakaPlaces } from '../data/osaka.js';
+import { PROFESSIONAL_CURATION_VERSION } from '../data/professionalCuration.js';
+import { buildDemoDataset } from '../data/demoDataset.js';
 import { getAll, putAll, getById } from './db.js';
-import { normalizePlaceRecord } from './placeData.js';
+import { getPlaceLatLng, normalizePlaceRecord } from './placeData.js';
 import { normalizeCityRecord } from './cityData.js';
 
 export async function runDataMigration() {
@@ -15,30 +13,19 @@ export async function runDataMigration() {
   // We'll check if the DB is empty.
   if (existingCities.length === 0) {
     console.log('Running initial data migration to IndexedDB...');
-    
-    // Convert cities object to array
-    const citiesArray = Object.values(cities).map((city, index) => normalizeCityRecord(city, index));
-    await putAll('cities', citiesArray);
-    
-    // Unify all places, adding cityId
-    const allPlaces = [
-      ...tokyoPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'tokyo' })),
-      ...kyotoPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'kyoto' })),
-      ...osakaPlaces.map((p) => normalizePlaceRecord({ ...p, cityId: 'osaka' }))
-    ];
-    await putAll('places', allPlaces);
-    
-    // Migrate favorites to planner store
+
+    const demoDataset = buildDemoDataset();
     const favorites = JSON.parse(localStorage.getItem('japan_favorites') || '[]');
-    const plannerItems = favorites.map(id => ({
-      placeId: id,
-      favorite: true,
-      status: null,
-      assignedDay: null
+    const favoriteIds = new Set(favorites);
+    const demoPlanner = demoDataset.planner.map((item) => ({
+      ...item,
+      favorite: favoriteIds.has(item.placeId) || item.favorite
     }));
-    if (plannerItems.length > 0) {
-      await putAll('planner', plannerItems);
-    }
+
+    await putAll('cities', demoDataset.cities);
+    await putAll('places', demoDataset.places);
+    await putAll('planner', demoPlanner);
+    await putAll('settings', demoDataset.settings);
     
     console.log('Migration complete!');
   }
@@ -49,10 +36,12 @@ export async function runDataMigration() {
       const current = existingPlaces[index];
       const currentScore = current?.score;
       const hasLegacyScore = currentScore && typeof currentScore === 'object';
-      const latMismatch = (current?.coordinates?.lat ?? null) !== (place.coordinates?.lat ?? null);
-      const lngMismatch = (current?.coordinates?.lng ?? null) !== (place.coordinates?.lng ?? null);
+      const currentLatLng = getPlaceLatLng(current);
+      const latMismatch = (currentLatLng?.lat ?? null) !== (place.lat ?? null);
+      const lngMismatch = (currentLatLng?.lng ?? null) !== (place.lng ?? null);
       const bestTimeMismatch = current?.bestTime !== place.bestTime;
       const hasLegacySource = Object.prototype.hasOwnProperty.call(current || {}, 'source');
+      const hasLegacyCoordinates = Object.prototype.hasOwnProperty.call(current || {}, 'coordinates');
       const textMismatch = current?.name !== place.name
         || current?.type !== place.type
         || current?.zone !== place.zone
@@ -68,6 +57,7 @@ export async function runDataMigration() {
         || current?.requiresTicket !== place.requiresTicket
         || bestTimeMismatch
         || hasLegacySource
+        || hasLegacyCoordinates
         || textMismatch
         || latMismatch
         || lngMismatch;
@@ -90,4 +80,38 @@ export async function runDataMigration() {
       await putAll('cities', normalizedCities);
     }
   }
+
+  await applyProfessionalCuration();
+}
+
+async function applyProfessionalCuration() {
+  const alreadyApplied = await getById('settings', PROFESSIONAL_CURATION_VERSION);
+  if (alreadyApplied) return;
+
+  const demoDataset = buildDemoDataset();
+  const demoPlaceById = new Map(demoDataset.places.map((place) => [place.id, place]));
+  const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+  if (!places.length) return;
+  const existingPlannerItems = await getAll('planner');
+  const favoriteByPlaceId = new Map(
+    existingPlannerItems.map((item) => [item.placeId, Boolean(item.favorite)])
+  );
+
+  const curatedPlaces = places.map((place) => {
+    const demoPlace = demoPlaceById.get(place.id);
+    return demoPlace
+      ? { ...place, rainyFriendly: demoPlace.rainyFriendly, score: place.score ?? demoPlace.score }
+      : place;
+  });
+  const existingIds = new Set(curatedPlaces.map((place) => place.id));
+  const planner = demoDataset.planner
+    .filter((item) => existingIds.has(item.placeId))
+    .map((item) => ({
+      ...item,
+      favorite: favoriteByPlaceId.get(item.placeId) || false
+    }));
+
+  await putAll('places', curatedPlaces);
+  await putAll('planner', planner);
+  await putAll('settings', [{ id: PROFESSIONAL_CURATION_VERSION, appliedAt: new Date().toISOString() }]);
 }

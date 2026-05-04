@@ -1,4 +1,5 @@
 import { categories, priorityLabels } from '../data/cities.js';
+import { getPlaceLatLng } from './placeData.js';
 
 let currentMap = null;
 let currentMarkers = [];
@@ -30,7 +31,8 @@ export function updateMapMarkers(map, places, openModalCallback) {
 
   // Add new markers
   places.forEach(place => {
-    if (!place.coordinates || !place.coordinates.lat || !place.coordinates.lng) return;
+    const latLng = getPlaceLatLng(place);
+    if (!latLng) return;
 
     const cat = categories.find(c => c.id === place.category);
     const prio = priorityLabels[place.priority];
@@ -49,7 +51,7 @@ export function updateMapMarkers(map, places, openModalCallback) {
     });
 
     // Create marker
-    const marker = L.marker([place.coordinates.lat, place.coordinates.lng], { icon: customIcon }).addTo(map);
+    const marker = L.marker([latLng.lat, latLng.lng], { icon: customIcon }).addTo(map);
 
     // Create popup content
     const popupContent = document.createElement('div');
@@ -77,13 +79,14 @@ export function updateMapMarkers(map, places, openModalCallback) {
 }
 
 export function renderPlaceMap(containerId, place) {
-  if (!place.coordinates || !place.coordinates.lat || !place.coordinates.lng) return null;
+  const latLng = getPlaceLatLng(place);
+  if (!latLng) return null;
   
   const map = L.map(containerId, {
     zoomControl: false,
     dragging: false,
     scrollWheelZoom: false
-  }).setView([place.coordinates.lat, place.coordinates.lng], 16);
+  }).setView([latLng.lat, latLng.lng], 16);
 
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap & CARTO',
@@ -103,7 +106,7 @@ export function renderPlaceMap(containerId, place) {
     iconAnchor: [20, 40]
   });
 
-  L.marker([place.coordinates.lat, place.coordinates.lng], { icon: customIcon }).addTo(map);
+  L.marker([latLng.lat, latLng.lng], { icon: customIcon }).addTo(map);
 
   return map;
 }
@@ -111,14 +114,15 @@ export function renderPlaceMap(containerId, place) {
 export function getGoogleMapsUrl(place, mapLinkStyle = 'smart') {
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   const nameEncoded = encodeURIComponent(place.name);
+  const latLng = getPlaceLatLng(place);
 
   // If we don't have coordinates, fallback to searching by name and city
-  if (!place.coordinates || !place.coordinates.lat || !place.coordinates.lng) {
+  if (!latLng) {
     const query = encodeURIComponent(`${place.name}, ${place.cityId || 'Japan'}`);
     return `https://www.google.com/maps/search/?api=1&query=${query}`;
   }
 
-  const { lat, lng } = place.coordinates;
+  const { lat, lng } = latLng;
 
   if (mapLinkStyle === 'coords') {
     // Classic mode: just coordinates

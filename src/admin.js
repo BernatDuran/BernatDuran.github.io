@@ -7,6 +7,7 @@ import { icons } from './utils/helpers.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { normalizePlaceRecord, PLACE_IMPORT_EXPORT_FIELDS, toImportExportRow } from './utils/placeData.js';
 import { formatRecommendedDays, normalizeCityRecord, sortCities } from './utils/cityData.js';
+import { buildDemoDataset } from './data/demoDataset.js';
 import * as XLSX from 'xlsx';
 
 const app = document.getElementById('app');
@@ -66,6 +67,50 @@ function showAdminToast(message, tone = 'success') {
     toast.remove();
     if (!portal.childElementCount) portal.remove();
   }, 3200);
+}
+
+function closeAdminModal() {
+  const modalOverlay = document.getElementById('admin-modal-overlay');
+  if (!modalOverlay) return;
+  modalOverlay.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function openAdminConfirmModal({ title, message, confirmLabel, tone = 'danger', onConfirm }) {
+  const modalOverlay = document.getElementById('admin-modal-overlay');
+  const modal = document.getElementById('admin-modal');
+  if (!modalOverlay || !modal) return;
+
+  const confirmStyle = tone === 'danger'
+    ? 'background:#dc2626; color:#fff; border:none;'
+    : 'background:var(--accent); color:#fff; border:none;';
+
+  modal.innerHTML = `
+    <div class="modal-header">
+      <h2>${title}</h2>
+      <button class="modal-close" id="admin-modal-close">&#x2715;</button>
+    </div>
+    <div class="modal-body" style="font-size:0.95rem; line-height:1.6;">
+      <p>${message}</p>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; flex-wrap:wrap;">
+        <button type="button" class="filter-pill" id="admin-confirm-cancel" style="border:1px solid var(--border); background:var(--bg-secondary);">Cancelar</button>
+        <button type="button" class="maps-link-btn" id="admin-confirm-action" style="${confirmStyle}">${confirmLabel}</button>
+      </div>
+    </div>
+  `;
+
+  modalOverlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('admin-modal-close')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-confirm-cancel')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-confirm-action')?.addEventListener('click', async () => {
+    try {
+      closeAdminModal();
+      await onConfirm();
+    } catch (error) {
+      showAdminToast(`No se pudo completar la accion: ${error.message}`, 'error');
+    }
+  });
 }
 
 function normalizePlannerRecord(item) {
@@ -155,6 +200,17 @@ async function render() {
           </label>
         </div>
         <p id="planner-import-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
+      </div>
+
+      <div class="admin-card" style="margin-top: 20px;">
+        <h3>&#x1F9EA; Datos demo y limpieza</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Restaura la app a los datos de ejemplo actuales o limpia partes concretas para probar flujos sin tocar c&oacute;digo.</p>
+        <div style="display:flex; gap:10px; flex-wrap: wrap;">
+          <button id="btn-load-demo-data" class="maps-link-btn" style="background:var(--accent);">&#x1F504; Cargar datos de ejemplo</button>
+          <button id="btn-clear-planner" class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary);">&#x1F9F9; Limpiar planificador</button>
+          <button id="btn-clear-places" class="maps-link-btn" style="background:#fee2e2; color:#991b1b;">&#x26A0;&#xFE0F; Limpiar actividades</button>
+        </div>
+        <p style="color: var(--text-tertiary); font-size:0.86rem; margin-top:10px;">Cargar datos de ejemplo sustituye ciudades, actividades, planificador y ajustes globales. Limpiar actividades tambi&eacute;n limpia el planificador para evitar referencias rotas.</p>
       </div>
 
       <!-- CITIES LIST SECTION -->
@@ -439,6 +495,55 @@ function attachEvents() {
       }
     };
     reader.readAsText(file);
+  });
+
+  document.getElementById('btn-load-demo-data')?.addEventListener('click', () => {
+    openAdminConfirmModal({
+      title: '&#x1F504; Cargar datos de ejemplo',
+      message: 'Esto sustituir&aacute; ciudades, actividades, planificador y ajustes globales por el dataset demo actual del proyecto. Es una acci&oacute;n pensada para volver al estado de ejemplo.',
+      confirmLabel: 'S&iacute;, cargar demo',
+      tone: 'primary',
+      onConfirm: async () => {
+        const demoDataset = buildDemoDataset();
+        await clear('cities');
+        await clear('places');
+        await clear('planner');
+        await clear('settings');
+        await putAll('cities', demoDataset.cities);
+        await putAll('places', demoDataset.places);
+        await putAll('planner', demoDataset.planner);
+        await putAll('settings', demoDataset.settings);
+        showAdminToast('Datos de ejemplo cargados correctamente.');
+        render();
+      }
+    });
+  });
+
+  document.getElementById('btn-clear-planner')?.addEventListener('click', () => {
+    openAdminConfirmModal({
+      title: '&#x1F9F9; Limpiar planificador',
+      message: 'Esto eliminar&aacute; el estado del planificador: bandeja, d&iacute;as asignados, orden, realizadas y descartadas. Las ciudades y actividades se mantienen.',
+      confirmLabel: 'S&iacute;, limpiar planificador',
+      onConfirm: async () => {
+        await clear('planner');
+        showAdminToast('Planificador limpiado correctamente.');
+        render();
+      }
+    });
+  });
+
+  document.getElementById('btn-clear-places')?.addEventListener('click', () => {
+    openAdminConfirmModal({
+      title: '&#x26A0;&#xFE0F; Limpiar actividades',
+      message: 'Esto eliminar&aacute; todas las actividades y tambi&eacute;n limpiar&aacute; el planificador para evitar referencias rotas. Las ciudades y ajustes se mantienen.',
+      confirmLabel: 'S&iacute;, limpiar actividades',
+      onConfirm: async () => {
+        await clear('places');
+        await clear('planner');
+        showAdminToast('Actividades y planificador limpiados correctamente.');
+        render();
+      }
+    });
   });
   // Add City
   document.getElementById('form-add-city').addEventListener('submit', async (e) => {
