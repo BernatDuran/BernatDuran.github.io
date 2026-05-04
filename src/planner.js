@@ -20,6 +20,10 @@ if ('serviceWorker' in navigator) {
 const app = document.getElementById('app');
 const DEFAULT_MAP_CENTER = { lat: 36.2048, lng: 138.2529 };
 const DAY_ROUTE_COLORS = ['#e94560', '#0ea5e9', '#22c55e', '#f97316', '#8b5cf6', '#14b8a6', '#f59e0b'];
+const EXPORT_SATURATION_ACTIVITY_LIMIT = 7;
+const EXPORT_SATURATION_MINUTES_LIMIT = 480;
+const EXPORT_MAP_CAPTURE_SCALE = 2;
+const EXPORT_MAP_TILE_TIMEOUT_MS = 4500;
 
 let _places = [];
 let _plannerItems = [];
@@ -38,6 +42,7 @@ let _toastPortal = null;
 let _toastHideTimer = null;
 let _toastRemoveTimer = null;
 let _plannerScoreDropdownOpen = false;
+const _pdfEmojiCache = new Map();
 
 function captureInputFocusState() {
   const activeElement = document.activeElement;
@@ -194,8 +199,15 @@ function getDayColor(day) {
   return DAY_ROUTE_COLORS[(day - 1) % DAY_ROUTE_COLORS.length];
 }
 
+function getPlaceLatLng(place) {
+  const lat = Number(place?.lat);
+  const lng = Number(place?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
 function hasValidCoordinates(place) {
-  return Number.isFinite(place?.coordinates?.lat) && Number.isFinite(place?.coordinates?.lng);
+  return Boolean(getPlaceLatLng(place));
 }
 
 function escapeHtml(value) {
@@ -458,6 +470,7 @@ function renderPlannerFilters(filteredCount) {
           </div>
           <div class="filters-inline-actions">
             ${renderPlannerPriorityFilters(true)}
+            <button class="maps-link-btn planner-export-btn" id="planner-export-btn" type="button">&#x1F4C4; Exportar itinerario</button>
             ${hasActivePlannerFilters() ? `<button class="clear-filters" id="planner-clear-filters">Limpiar filtros</button>` : ''}
           </div>
           <span class="results-count">${filteredCount} actividades visibles</span>
@@ -505,12 +518,23 @@ function buildMapModel(scope, groups) {
   });
 
   const routes = selectedDays
-    .map((day) => ({
-      day,
-      color: getDayColor(day),
-      entries: mappableEntries.filter((entry) => entry.day === day)
-    }))
-    .filter((route) => route.entries.length > 0);
+    .map((day) => {
+      const allEntries = scopedEntries
+        .filter((entry) => entry.day === day)
+        .map((entry, index) => ({
+          ...entry,
+          exportOrder: index + 1
+        }));
+      return {
+        day,
+        color: getDayColor(day),
+        allEntries,
+        entries: allEntries.filter((entry) => hasValidCoordinates(entry.place))
+      };
+    })
+    .filter((route) => route.allEntries.length > 0);
+
+  const distance = buildMapDistanceModel(routes);
 
   return {
     scope: normalizedScope,
@@ -520,7 +544,8 @@ function buildMapModel(scope, groups) {
     mappedCount: mappableEntries.length,
     missingCount: missingEntries.length,
     missingEntries,
-    routes
+    routes,
+    distance
   };
 }
 
@@ -640,9 +665,11 @@ function renderMapLegend(model) {
   if (model.scope !== 'all' || model.routes.length === 0) return '';
 
   const chips = model.routes
+    .filter((route) => route.entries.length > 0)
     .map((route) => `<span class="planner-map-legend-chip"><span class="planner-map-legend-dot" style="background:${route.color};"></span>D&iacute;a ${route.day}</span>`)
     .join('');
 
+  if (!chips) return '';
   return `<div class="planner-map-legend">${chips}</div>`;
 }
 
@@ -667,6 +694,137 @@ function renderMapMissingList(model) {
   `;
 }
 
+function calculateHaversineDistanceKm(coordA, coordB) {
+  const earthRadiusKm = 6371;
+  const toRadians = (degrees) => degrees * Math.PI / 180;
+  const latDelta = toRadians(coordB.lat - coordA.lat);
+  const lngDelta = toRadians(coordB.lng - coordA.lng);
+  const latA = toRadians(coordA.lat);
+  const latB = toRadians(coordB.lat);
+  const haversine = Math.sin(latDelta / 2) ** 2
+    + Math.cos(latA) * Math.cos(latB) * Math.sin(lngDelta / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function formatSegmentDistanceKm(distanceKm) {
+  if (!Number.isFinite(distanceKm)) return 'N/D';
+  return `${distanceKm >= 1 ? distanceKm.toFixed(1) : distanceKm.toFixed(2)} km`;
+}
+
+function formatTotalDistanceKm(distanceKm) {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return '0 km';
+  return `${distanceKm.toFixed(1)} km`;
+}
+
+function buildPlannerSegments(orderedEntries) {
+  const segments = [];
+  let omittedCount = 0;
+
+  for (let index = 1; index < orderedEntries.length; index += 1) {
+    const fromEntry = orderedEntries[index - 1];
+    const toEntry = orderedEntries[index];
+    const fromCoord = getPlaceLatLng(fromEntry.place);
+    const toCoord = getPlaceLatLng(toEntry.place);
+
+    if (!fromCoord || !toCoord) {
+      omittedCount += 1;
+      continue;
+    }
+
+    const fromOrder = fromEntry.exportOrder || (fromEntry.item?.order ?? index - 1) + 1;
+    const toOrder = toEntry.exportOrder || (toEntry.item?.order ?? index) + 1;
+
+    segments.push({
+      day: fromEntry.day,
+      fromOrder,
+      toOrder,
+      fromPlace: fromEntry.place,
+      toPlace: toEntry.place,
+      distanceKm: calculateHaversineDistanceKm(fromCoord, toCoord)
+    });
+  }
+
+  return { segments, omittedCount };
+}
+
+function calculateDayDistanceSummary(segments) {
+  const totalDistanceKm = segments.reduce((sum, segment) => sum + segment.distanceKm, 0);
+  const longestSegment = segments.reduce((longest, segment) => (
+    !longest || segment.distanceKm > longest.distanceKm ? segment : longest
+  ), null);
+
+  return {
+    segmentCount: segments.length,
+    totalDistanceKm,
+    longestSegment
+  };
+}
+
+function buildMapDistanceModel(routes) {
+  const allSegments = [];
+  let omittedCount = 0;
+
+  routes.forEach((route) => {
+    const { segments, omittedCount: routeOmittedCount } = buildPlannerSegments(route.allEntries || route.entries);
+    allSegments.push(...segments);
+    omittedCount += routeOmittedCount;
+  });
+
+  return {
+    segments: allSegments,
+    summary: calculateDayDistanceSummary(allSegments),
+    omittedCount
+  };
+}
+
+function renderDistanceSummary(model) {
+  const summary = model.distance.summary;
+  const longestText = summary.longestSegment
+    ? formatSegmentDistanceKm(summary.longestSegment.distanceKm)
+    : 'N/D';
+
+  return `
+    <div class="planner-map-distance-summary" aria-label="Resumen de distancia lineal">
+      <div class="planner-map-distance-stat"><strong>${model.plannedCount}</strong><span>actividades</span></div>
+      <div class="planner-map-distance-stat"><strong>${summary.segmentCount}</strong><span>tramos</span></div>
+      <div class="planner-map-distance-stat"><strong>${formatTotalDistanceKm(summary.totalDistanceKm)}</strong><span>distancia lineal total</span></div>
+      <div class="planner-map-distance-stat"><strong>${longestText}</strong><span>tramo m&aacute;s largo</span></div>
+    </div>
+  `;
+}
+
+function renderDistanceSegmentsList(model) {
+  const segments = model.distance.segments;
+  if (!segments.length && model.plannedCount > 1) {
+    return `
+      <aside class="planner-map-segments-card">
+        <h4>Tramos en l&iacute;nea recta</h4>
+        <p class="planner-map-segments-empty">No hay tramos calculables con coordenadas v&aacute;lidas.</p>
+      </aside>
+    `;
+  }
+  if (!segments.length) return '';
+
+  const showDay = model.scope === 'all';
+  const rows = segments.map((segment) => `
+    <li class="planner-map-segment-row">
+      <div class="planner-map-segment-main">
+        <span class="planner-map-segment-orders">${segment.fromOrder} &rarr; ${segment.toOrder}</span>
+        <span class="planner-map-segment-names">${escapeHtml(segment.fromPlace.name)} &rarr; ${escapeHtml(segment.toPlace.name)}</span>
+        ${showDay ? `<span class="planner-map-segment-day">D&iacute;a ${segment.day}</span>` : ''}
+      </div>
+      <strong>${formatSegmentDistanceKm(segment.distanceKm)}</strong>
+    </li>
+  `).join('');
+
+  return `
+    <aside class="planner-map-segments-card">
+      <h4>Tramos en l&iacute;nea recta</h4>
+      <ul>${rows}</ul>
+    </aside>
+  `;
+}
+
 function renderMapPanel(model) {
   let emptyMessage = '';
   if (model.plannedCount === 0) {
@@ -679,24 +837,981 @@ function renderMapPanel(model) {
     <div class="planner-map-layout">
       <div class="planner-map-toolbar">
         ${renderMapScopeBar(model)}
-        <div class="planner-map-stats">
-          <div class="planner-map-stat"><strong>${model.plannedCount}</strong><span>planificadas</span></div>
-          <div class="planner-map-stat"><strong>${model.mappedCount}</strong><span>geolocalizadas</span></div>
-          <div class="planner-map-stat"><strong>${model.missingCount}</strong><span>omitidas</span></div>
-          <div class="planner-map-stat"><strong>${model.allPlannedCount}</strong><span>total viaje</span></div>
-        </div>
+        ${renderDistanceSummary(model)}
       </div>
 
       ${renderMapLegend(model)}
 
-      <div class="planner-map-shell">
-        <div id="planner-map-container" class="planner-map-container ${model.mappedCount === 0 ? 'is-hidden' : ''}"></div>
-        ${emptyMessage ? `<div class="planner-map-empty">${emptyMessage}</div>` : ''}
+      <div class="planner-map-content-grid">
+        <div class="planner-map-shell">
+          <div id="planner-map-container" class="planner-map-container ${model.mappedCount === 0 ? 'is-hidden' : ''}"></div>
+          ${emptyMessage ? `<div class="planner-map-empty">${emptyMessage}</div>` : ''}
+        </div>
+        ${renderDistanceSegmentsList(model)}
       </div>
 
+      ${model.distance.omittedCount ? `<div class="planner-map-distance-warning">Algunos tramos no se han podido calcular por falta de coordenadas.</div>` : ''}
       ${renderMapMissingList(model)}
     </div>
   `;
+}
+
+function getDateTextForDay(dayNum) {
+  if (!_globalSettings?.startDate) return `Dia ${dayNum}`;
+  const date = new Date(_globalSettings.startDate);
+  date.setDate(date.getDate() + dayNum - 1);
+  return date.toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+}
+
+function getMostCommonLabel(values) {
+  const counts = new Map();
+  values.filter(Boolean).forEach((value) => {
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+}
+
+function getExportDaySummary(entries) {
+  const totalMinutes = entries.reduce((sum, entry) => {
+    const minutes = parseEstimatedDurationToMinutes(entry.place?.estimatedDuration);
+    return Number.isFinite(minutes) ? sum + minutes : sum;
+  }, 0);
+  const priorityCounts = entries.reduce((acc, entry) => {
+    const priority = entry.place.priority || 'optional';
+    acc[priority] = (acc[priority] || 0) + 1;
+    return acc;
+  }, {});
+  const mainCity = getMostCommonLabel(entries.map((entry) => getCityName(entry.place.cityId)));
+  const mainZone = getMostCommonLabel(entries.map((entry) => entry.place.zone));
+
+  return {
+    activityCount: entries.length,
+    totalMinutes,
+    totalDurationText: formatDurationMinutes(totalMinutes, { approximate: true }) || 'Sin duracion estimada',
+    priorityCounts,
+    mainLabel: [mainCity, mainZone].filter(Boolean).join(' · '),
+    rainyCount: entries.filter((entry) => entry.place.rainyFriendly).length,
+    ticketCount: entries.filter((entry) => entry.place.requiresTicket).length,
+    isSaturated: entries.length >= EXPORT_SATURATION_ACTIVITY_LIMIT || totalMinutes >= EXPORT_SATURATION_MINUTES_LIMIT
+  };
+}
+
+function getExportDays(scope, selectedDay) {
+  const groups = buildGroupedData(_places);
+  const days = scope === 'day'
+    ? [Number.parseInt(selectedDay, 10)]
+    : Array.from({ length: _totalTripDays }, (_, i) => i + 1);
+
+  return days
+    .filter((day) => Number.isFinite(day) && day >= 1 && day <= _totalTripDays)
+    .map((day) => ({
+      day,
+      dateText: getDateTextForDay(day),
+      entries: (groups[day] || []).map((entry, index) => ({
+        ...entry,
+        day,
+        exportOrder: index + 1
+      }))
+    }))
+    .filter((dayData) => dayData.entries.length > 0);
+}
+
+function openPlannerExportModal() {
+  const overlay = document.getElementById('planner-export-overlay');
+  const modal = document.getElementById('planner-export-modal');
+  if (!overlay || !modal) return;
+
+  const dayOptions = Array.from({ length: _totalTripDays }, (_, i) => i + 1)
+    .map((day) => {
+      const isActive = day === 1;
+      return `
+        <button type="button"
+                class="single-select-option ${isActive ? 'active' : ''}"
+                data-export-day="${day}">
+          Dia ${day} · ${escapeHtml(getDateTextForDay(day))}
+        </button>
+      `;
+    })
+    .join('');
+
+  modal.innerHTML = `
+    <div class="modal-scroll">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <div>
+          <h2>Exportar itinerario</h2>
+          <div class="place-card-category" style="margin:0;">PDF visual para preparar o llevar durante el viaje</div>
+        </div>
+        <button class="modal-close" id="planner-export-close">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <form id="planner-export-form" class="planner-export-form">
+          <div class="planner-export-fieldset">
+            <div class="planner-export-label">Alcance de exportacion</div>
+            <label><input type="radio" name="exportScope" value="all" checked> Todo el viaje</label>
+            <label><input type="radio" name="exportScope" value="day"> Dia concreto</label>
+          </div>
+          <div class="planner-export-fieldset is-hidden" id="planner-export-day-field">
+            <div class="planner-export-label">Selector de dia</div>
+            <input type="hidden" id="planner-export-day" value="1">
+            <details class="filter-dropdown single-select-dropdown planner-export-day-dropdown">
+              <summary class="zone-select single-select-summary" id="planner-export-day-summary">Dia 1 · ${escapeHtml(getDateTextForDay(1))}</summary>
+              <div class="single-select-panel">
+                ${dayOptions}
+              </div>
+            </details>
+          </div>
+          <div class="planner-export-fieldset">
+            <div class="planner-export-label">Tipo de exportacion</div>
+            <label><input type="radio" name="exportType" value="detailed" checked> PDF detallado</label>
+            <label><input type="radio" name="exportType" value="summary"> PDF resumen</label>
+          </div>
+          <p class="planner-export-note">El PDF mantiene el texto seleccionable. El mapa intenta usar calles reales y, si los tiles externos fallan, usa un esquema seguro.</p>
+          <button type="submit" class="maps-link-btn planner-export-submit">&#x1F4C4; Generar PDF</button>
+        </form>
+      </div>
+    </div>
+  `;
+
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  modal.querySelector('#planner-export-close')?.addEventListener('click', closePlannerExportModal);
+  modal.querySelectorAll('input[name="exportScope"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      modal.querySelector('#planner-export-day-field')?.classList.toggle('is-hidden', input.value !== 'day' || !input.checked);
+    });
+  });
+  modal.querySelectorAll('[data-export-day]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const selectedDay = button.dataset.exportDay || '1';
+      const selectedLabel = button.textContent.trim();
+      const hiddenInput = modal.querySelector('#planner-export-day');
+      const summary = modal.querySelector('#planner-export-day-summary');
+      if (hiddenInput) hiddenInput.value = selectedDay;
+      if (summary) summary.textContent = selectedLabel;
+      modal.querySelectorAll('[data-export-day]').forEach((option) => option.classList.toggle('active', option === button));
+      modal.querySelector('.planner-export-day-dropdown')?.removeAttribute('open');
+    });
+  });
+  modal.querySelector('#planner-export-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const scope = modal.querySelector('input[name="exportScope"]:checked')?.value || 'all';
+    const exportType = modal.querySelector('input[name="exportType"]:checked')?.value || 'detailed';
+    const selectedDay = modal.querySelector('#planner-export-day')?.value || '1';
+    await generatePlannerPdf({ scope, exportType, selectedDay });
+  });
+}
+
+function closePlannerExportModal() {
+  document.getElementById('planner-export-overlay')?.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function getJsPdfConstructor() {
+  return window.jspdf?.jsPDF || window.jsPDF || null;
+}
+
+function getHtml2Canvas() {
+  return window.html2canvas || null;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function toPdfText(value) {
+  return String(value ?? '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&middot;/g, '·')
+    .replace(/&mdash;/g, '-')
+    .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/gu, '')
+    .replace(/[^\u0009\u000A\u000D\u0020-\u00FF]/g, (char) => {
+      const normalized = char.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return /^[\u0020-\u00FF]+$/.test(normalized) ? normalized : '';
+    })
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hexToRgb(hex) {
+  const normalized = String(hex || '').replace('#', '');
+  if (normalized.length !== 6) return [17, 24, 39];
+  return [
+    Number.parseInt(normalized.slice(0, 2), 16),
+    Number.parseInt(normalized.slice(2, 4), 16),
+    Number.parseInt(normalized.slice(4, 6), 16)
+  ];
+}
+
+function setPdfColor(doc, hex, mode = 'text') {
+  const [r, g, b] = hexToRgb(hex);
+  if (mode === 'draw') doc.setDrawColor(r, g, b);
+  else if (mode === 'fill') doc.setFillColor(r, g, b);
+  else doc.setTextColor(r, g, b);
+}
+
+function createPdfLayout(doc) {
+  const marginLeft = 10;
+  const marginRight = 12;
+  return {
+    pageWidth: doc.internal.pageSize.getWidth(),
+    pageHeight: doc.internal.pageSize.getHeight(),
+    marginX: marginLeft,
+    marginRight,
+    marginTop: 12,
+    marginBottom: 14,
+    contentWidth: doc.internal.pageSize.getWidth() - marginLeft - marginRight,
+    accent: '#e94560',
+    dark: '#111827',
+    muted: '#64748b',
+    softBorder: '#e5e7eb',
+    softBg: '#f8fafc'
+  };
+}
+
+function ensurePdfSpace(doc, layout, y, neededHeight) {
+  if (y + neededHeight <= layout.pageHeight - layout.marginBottom) return y;
+  doc.addPage();
+  return layout.marginTop;
+}
+
+function drawWrappedPdfText(doc, text, x, y, width, options = {}) {
+  const fontSize = options.fontSize || 9;
+  const lineHeight = options.lineHeight || fontSize * 0.44;
+  doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
+  doc.setFontSize(fontSize);
+  if (options.color) setPdfColor(doc, options.color);
+  const lines = doc.splitTextToSize(toPdfText(text), width);
+  if (lines.length) doc.text(lines, x, y);
+  return y + lines.length * lineHeight;
+}
+
+function drawPdfSummaryCard(doc, x, y, width, stats, layout) {
+  setPdfColor(doc, layout.softBg, 'fill');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.roundedRect(x, y, width, 12, 3, 3, 'FD');
+  const columnWidth = width / stats.length;
+  stats.forEach((stat, index) => {
+    const columnX = x + columnWidth * index;
+    if (index > 0) {
+      setPdfColor(doc, layout.softBorder, 'draw');
+      doc.setLineWidth(0.25);
+      doc.line(columnX, y + 2.5, columnX, y + 9.5);
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    setPdfColor(doc, layout.accent);
+    doc.text(toPdfText(stat.value), columnX + 4, y + 5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    setPdfColor(doc, layout.muted);
+    doc.text(toPdfText(stat.label).toUpperCase(), columnX + 4, y + 9.2);
+  });
+}
+
+function drawPdfCover(doc, layout, days, exportType) {
+  const totalActivities = days.reduce((sum, dayData) => sum + dayData.entries.length, 0);
+  const totalMinutes = days.reduce((sum, dayData) => sum + getExportDaySummary(dayData.entries).totalMinutes, 0);
+  let y = layout.marginTop;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  setPdfColor(doc, layout.accent);
+  doc.text('JAPON 2026', layout.marginX, y);
+  y += 8;
+
+  doc.setFontSize(22);
+  setPdfColor(doc, layout.dark);
+  doc.text(exportType === 'summary' ? 'Itinerario de viaje (resumen)' : 'Itinerario de viaje', layout.marginX, y);
+  y += 8;
+
+  drawPdfSummaryCard(doc, layout.marginX, y, Math.min(layout.contentWidth, 118), [
+    { label: 'dias exportados', value: String(days.length) },
+    { label: 'actividades', value: String(totalActivities) },
+    { label: 'visitas estimadas', value: formatDurationMinutes(totalMinutes, { approximate: true }) || 'N/D' }
+  ], layout);
+  y += 17;
+
+  setPdfColor(doc, layout.accent, 'draw');
+  doc.setLineWidth(0.8);
+  doc.line(layout.marginX, y, layout.pageWidth - layout.marginX, y);
+  return y + 10;
+}
+
+function drawPdfDayHeader(doc, layout, dayData, y) {
+  const summary = getExportDaySummary(dayData.entries);
+  y = ensurePdfSpace(doc, layout, y, 24);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  setPdfColor(doc, layout.accent);
+  doc.text(`DIA ${dayData.day}`, layout.marginX, y);
+  y += 6;
+
+  doc.setFontSize(15);
+  setPdfColor(doc, layout.dark);
+  doc.text(toPdfText(dayData.dateText), layout.marginX, y);
+  y += 5;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  setPdfColor(doc, layout.muted);
+  doc.text(toPdfText(summary.mainLabel || 'Ruta del dia'), layout.marginX, y);
+  y += 5;
+
+  if (summary.isSaturated) {
+    setPdfColor(doc, '#fff7ed', 'fill');
+    setPdfColor(doc, '#fed7aa', 'draw');
+    doc.roundedRect(layout.marginX, y, layout.contentWidth, 9, 2, 2, 'FD');
+    y = drawWrappedPdfText(doc, 'Dia intenso: revisa pausas, comidas y desplazamientos antes de cerrarlo.', layout.marginX + 3, y + 5.7, layout.contentWidth - 6, {
+      fontSize: 8,
+      lineHeight: 4,
+      color: '#9a3412',
+      bold: true
+    }) + 2;
+  }
+
+  return y + 2;
+}
+
+function getPdfRoutePoints(entries, x, y, width, height) {
+  const points = entries
+    .map((entry) => ({ entry, latLng: getPlaceLatLng(entry.place) }))
+    .filter((point) => point.latLng);
+  if (!points.length) return [];
+
+  if (points.length === 1) {
+    return [{
+      ...points[0],
+      x: x + width / 2,
+      y: y + height / 2
+    }];
+  }
+
+  const averageLat = points.reduce((sum, point) => sum + point.latLng.lat, 0) / points.length;
+  const lngScale = Math.max(Math.cos(averageLat * Math.PI / 180), 0.2);
+  const projected = points.map((point) => ({
+    ...point,
+    mapX: point.latLng.lng * lngScale,
+    mapY: point.latLng.lat
+  }));
+  const xValues = projected.map((point) => point.mapX);
+  const yValues = projected.map((point) => point.mapY);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minY = Math.min(...yValues);
+  const maxY = Math.max(...yValues);
+  const xSpan = maxX - minX;
+  const ySpan = maxY - minY;
+
+  if (xSpan === 0 && ySpan === 0) {
+    return projected.map((point) => ({
+      ...point,
+      x: x + width / 2,
+      y: y + height / 2
+    }));
+  }
+
+  const padding = 5;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - padding * 2;
+  const scale = Math.min(
+    xSpan > 0 ? usableWidth / xSpan : Number.POSITIVE_INFINITY,
+    ySpan > 0 ? usableHeight / ySpan : Number.POSITIVE_INFINITY
+  );
+  const routeWidth = xSpan > 0 ? xSpan * scale : 0;
+  const routeHeight = ySpan > 0 ? ySpan * scale : 0;
+  const offsetX = x + (width - routeWidth) / 2;
+  const offsetY = y + (height - routeHeight) / 2;
+
+  return projected.map((point) => ({
+    ...point,
+    x: xSpan > 0 ? offsetX + (point.mapX - minX) * scale : x + width / 2,
+    y: ySpan > 0 ? offsetY + routeHeight - (point.mapY - minY) * scale : y + height / 2
+  }));
+}
+
+function getPdfMapHeight(compact = false) {
+  return 62;
+}
+
+function drawPdfRouteMap(doc, layout, entries, y, compact = false) {
+  const mapHeight = getPdfMapHeight(compact);
+  y = ensurePdfSpace(doc, layout, y, mapHeight + 8);
+  const x = layout.marginX;
+  const width = layout.contentWidth;
+  const points = getPdfRoutePoints(entries, x, y, width, mapHeight);
+  const dayColor = getDayColor(entries[0]?.day || 1);
+  const [accentR, accentG, accentB] = hexToRgb(dayColor);
+
+  setPdfColor(doc, layout.softBg, 'fill');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.roundedRect(x, y, width, mapHeight, 3, 3, 'FD');
+
+  if (!points.length) {
+    drawWrappedPdfText(doc, 'Sin coordenadas suficientes para dibujar mapa.', x + 6, y + 17, width - 12, {
+      fontSize: 8,
+      color: layout.muted
+    });
+    return y + mapHeight + 5;
+  }
+
+  if (points.length > 1) {
+    doc.setDrawColor(accentR, accentG, accentB);
+    doc.setLineWidth(compact ? 0.55 : 0.75);
+    for (let i = 1; i < points.length; i += 1) {
+      doc.line(points[i - 1].x, points[i - 1].y, points[i].x, points[i].y);
+    }
+  }
+
+  points.forEach((point) => {
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(accentR, accentG, accentB);
+    doc.setLineWidth(0.5);
+    doc.circle(point.x, point.y, compact ? 1.55 : 2.05, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(compact ? 4.4 : 5.1);
+    setPdfColor(doc, layout.dark);
+    doc.text(String(point.entry.exportOrder), point.x, point.y, { align: 'center', baseline: 'middle' });
+  });
+
+  return y + mapHeight + 5;
+}
+
+function getExportMapEntries(entries) {
+  return entries
+    .map((entry) => ({ ...entry, latLng: getPlaceLatLng(entry.place) }))
+    .filter((entry) => entry.latLng);
+}
+
+function createExportMapCaptureHost(widthPx, heightPx) {
+  const host = document.createElement('div');
+  host.className = 'planner-pdf-map-capture';
+  host.style.cssText = `
+    position: fixed;
+    left: -12000px;
+    top: 0;
+    width: ${widthPx}px;
+    height: ${heightPx}px;
+    overflow: hidden;
+    background: #eef2f7;
+    z-index: -1;
+    pointer-events: none;
+  `;
+  document.body.appendChild(host);
+  return host;
+}
+
+function waitForTileLayer(tileLayer, timeoutMs = EXPORT_MAP_TILE_TIMEOUT_MS) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      tileLayer.off('load', finish);
+      resolve();
+    };
+    tileLayer.on('load', finish);
+    window.setTimeout(finish, timeoutMs);
+  });
+}
+
+function getExportMapMarkerHtml(entry, color, compact) {
+  const size = 21;
+  const fontSize = 9.5;
+  return `
+    <div style="
+      width:${size}px;
+      height:${size}px;
+      box-sizing:border-box;
+      border-radius:999px;
+      border:2px solid ${color};
+      background:#fff;
+      color:#111827;
+      position:relative;
+      font:700 ${fontSize}px/1 Arial, sans-serif;
+      text-align:center;
+      box-shadow:0 3px 9px rgba(15,23,42,0.18);
+    ">
+      <span style="
+        position:absolute;
+        left:50%;
+        top:50%;
+        transform:translate(-50%, -95%);
+        display:block;
+        line-height:1;
+        width:100%;
+        text-align:center;
+      ">${entry.exportOrder}</span>
+    </div>
+  `;
+}
+
+async function captureLeafletMapForPdf(entries, compact = false) {
+  const html2canvas = getHtml2Canvas();
+  if (!html2canvas || typeof L === 'undefined') return null;
+
+  const mapEntries = getExportMapEntries(entries);
+  if (!mapEntries.length) return null;
+
+  const widthPx = 1180;
+  const heightPx = 390;
+  const host = createExportMapCaptureHost(widthPx, heightPx);
+  let map = null;
+
+  try {
+    map = L.map(host, {
+      zoomControl: false,
+      attributionControl: false,
+      preferCanvas: true,
+      dragging: false,
+      touchZoom: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      tap: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false,
+      zoomAnimation: false
+    });
+
+    const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 19,
+      crossOrigin: true,
+      detectRetina: true
+    });
+    const tilesReady = waitForTileLayer(tileLayer);
+    tileLayer.addTo(map);
+
+    const routeColor = getDayColor(entries[0]?.day || 1);
+    const latLngs = mapEntries.map((entry) => [entry.latLng.lat, entry.latLng.lng]);
+
+    if (latLngs.length > 1) {
+      L.polyline(latLngs, {
+        color: routeColor,
+        weight: 3,
+        opacity: 0.88,
+        lineJoin: 'round',
+        lineCap: 'round'
+      }).addTo(map);
+    }
+
+    mapEntries.forEach((entry) => {
+      const icon = L.divIcon({
+        className: 'planner-pdf-map-marker',
+        html: getExportMapMarkerHtml(entry, routeColor, compact),
+        iconSize: [21, 21],
+        iconAnchor: [10.5, 10.5]
+      });
+      L.marker([entry.latLng.lat, entry.latLng.lng], { icon, interactive: false }).addTo(map);
+    });
+
+    map.invalidateSize({ pan: false });
+    if (latLngs.length === 1) {
+      map.setView(latLngs[0], 15, { animate: false });
+    } else {
+      map.fitBounds(latLngs, { padding: [22, 22], animate: false });
+    }
+
+    await Promise.race([tilesReady, wait(EXPORT_MAP_TILE_TIMEOUT_MS)]);
+    await wait(350);
+
+    const canvas = await html2canvas(host, {
+      backgroundColor: '#eef2f7',
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      scale: EXPORT_MAP_CAPTURE_SCALE,
+      width: widthPx,
+      height: heightPx,
+      windowWidth: widthPx,
+      windowHeight: heightPx
+    });
+
+    return {
+      dataUrl: canvas.toDataURL('image/jpeg', 0.92),
+      widthPx,
+      heightPx
+    };
+  } catch (error) {
+    console.warn('No se pudo capturar el mapa Leaflet para el PDF. Se usara el mapa esquematico.', error);
+    return null;
+  } finally {
+    if (map) {
+      map.off();
+      map.remove();
+    }
+    host.remove();
+  }
+}
+
+async function drawPdfRouteMapWithFallback(doc, layout, entries, y, compact = false) {
+  const mapHeight = getPdfMapHeight(false);
+  y = ensurePdfSpace(doc, layout, y, mapHeight + 8);
+
+  const capturedMap = await captureLeafletMapForPdf(entries, false);
+  if (!capturedMap) {
+    return drawPdfRouteMap(doc, layout, entries, y, false);
+  }
+
+  const x = layout.marginX;
+  const width = layout.contentWidth;
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.roundedRect(x, y, width, mapHeight, 3, 3, 'S');
+  doc.addImage(capturedMap.dataUrl, 'JPEG', x, y, width, mapHeight, undefined, 'FAST');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.roundedRect(x, y, width, mapHeight, 3, 3, 'S');
+  return y + mapHeight + 5;
+}
+
+function getPdfActivityMeta(place) {
+  const category = categories.find((item) => item.id === place.category);
+  return `${getCityName(place.cityId)} · ${place.zone || 'Zona pendiente'} · ${category?.label || place.category || 'Categoria'}`;
+}
+
+function getPdfPriorityEmoji(priority) {
+  if (priority === 'must-see') return '\u{1F525}';
+  if (priority === 'recommended') return '\u{1F44D}';
+  return '\u{1F4A1}';
+}
+
+function getPdfActivityChips(place) {
+  const priority = priorityLabels[place.priority];
+  const priorityTone = place.priority === 'must-see'
+    ? 'danger'
+    : place.priority === 'recommended'
+      ? 'warning'
+      : 'neutral';
+  return [
+    { label: priority?.label || 'Opcional', icon: 'priority', emoji: getPdfPriorityEmoji(place.priority), tone: priorityTone },
+    { label: place.estimatedDuration || 'Duracion pendiente', icon: 'clock', emoji: '\u{1F552}', tone: 'neutral' },
+    { label: formatBestTimeLabel(place.bestTime), icon: 'sun', emoji: '\u2600\uFE0F', tone: 'sun' },
+    { label: place.rainyFriendly ? 'Apta lluvia' : 'Evitar lluvia', icon: 'rain', emoji: place.rainyFriendly ? '\u2614' : '\u{1F327}\uFE0F', tone: place.rainyFriendly ? 'rain' : 'neutral' },
+    { label: place.requiresTicket ? 'Requiere entrada' : 'No requiere entrada', icon: 'ticket', emoji: '\u{1F3AB}', tone: place.requiresTicket ? 'info' : 'success' },
+    formatScore(place.score) ? { label: formatScore(place.score), icon: 'score', emoji: '\u2B50', tone: 'score' } : null
+  ].filter(Boolean);
+}
+
+function getPdfActivitySections(place) {
+  return [
+    place.address ? { label: 'Direccion', value: place.address } : null,
+    place.ticketInfo ? { label: 'Entrada', value: place.ticketInfo } : null,
+    place.tips ? { label: 'Consejo practico', value: place.tips } : null,
+    place.comment ? { label: 'Nota', value: place.comment } : null
+  ].filter(Boolean);
+}
+
+function getPdfChipLabel(chip) {
+  return typeof chip === 'string' ? chip : chip?.label || '';
+}
+
+function getPdfChipColors(chip, layout) {
+  const palettes = {
+    danger: { bg: '#fff1f2', border: '#fecdd3', text: '#e11d48', icon: '#ef4444' },
+    warning: { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c', icon: '#f97316' },
+    sun: { bg: '#fffbeb', border: '#fde68a', text: '#92400e', icon: '#f59e0b' },
+    rain: { bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8', icon: '#2563eb' },
+    info: { bg: '#eef2ff', border: '#c7d2fe', text: '#4338ca', icon: '#4f46e5' },
+    success: { bg: '#f0fdf4', border: '#bbf7d0', text: '#166534', icon: '#16a34a' },
+    score: { bg: '#fffbeb', border: '#fde68a', text: '#92400e', icon: '#f59e0b' },
+    neutral: { bg: '#f8fafc', border: layout.softBorder, text: layout.muted, icon: '#475569' }
+  };
+  return palettes[chip?.tone] || palettes.neutral;
+}
+
+function getPdfChipWidth(doc, chip) {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(5.85);
+  return Math.min(Math.max(doc.getTextWidth(toPdfText(getPdfChipLabel(chip))) + 9.3, 18), 64);
+}
+
+function fitPdfTextToWidth(doc, text, width) {
+  const cleanText = toPdfText(text);
+  if (doc.getTextWidth(cleanText) <= width) return cleanText;
+  let result = cleanText;
+  while (result.length > 1 && doc.getTextWidth(`${result}...`) > width) {
+    result = result.slice(0, -1);
+  }
+  return `${result.trim()}...`;
+}
+
+function measurePdfChipRows(doc, chips, width) {
+  let rows = 1;
+  let currentWidth = 0;
+  chips.forEach((chip) => {
+    const chipWidth = getPdfChipWidth(doc, chip);
+    const nextWidth = currentWidth ? currentWidth + 2 + chipWidth : chipWidth;
+    if (nextWidth > width && currentWidth) {
+      rows += 1;
+      currentWidth = chipWidth;
+    } else {
+      currentWidth = nextWidth;
+    }
+  });
+  return rows;
+}
+
+function getPdfEmojiImage(emoji) {
+  if (!emoji || typeof document === 'undefined') return null;
+  if (_pdfEmojiCache.has(emoji)) return _pdfEmojiCache.get(emoji);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = '64px "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, 48, 50);
+
+  const dataUrl = canvas.toDataURL('image/png');
+  _pdfEmojiCache.set(emoji, dataUrl);
+  return dataUrl;
+}
+
+function drawPdfChipIcon(doc, chip, x, y, colors) {
+  const emojiImage = getPdfEmojiImage(chip.emoji);
+  if (emojiImage) {
+    doc.addImage(emojiImage, 'PNG', x, y + 0.15, 3.2, 3.2, undefined, 'FAST');
+    return;
+  }
+
+  setPdfColor(doc, colors.icon, 'draw');
+  setPdfColor(doc, colors.icon, 'fill');
+  doc.setLineWidth(0.35);
+  if (chip.icon === 'clock') {
+    doc.circle(x + 1.7, y + 2.75, 1.55, 'S');
+    doc.line(x + 1.7, y + 2.75, x + 1.7, y + 1.75);
+    doc.line(x + 1.7, y + 2.75, x + 2.55, y + 2.95);
+  } else if (chip.icon === 'sun') {
+    doc.circle(x + 1.7, y + 2.75, 1.15, 'S');
+    doc.line(x + 1.7, y + 0.8, x + 1.7, y + 0.1);
+    doc.line(x + 1.7, y + 4.7, x + 1.7, y + 5.4);
+    doc.line(x - 0.2, y + 2.75, x - 0.85, y + 2.75);
+    doc.line(x + 3.6, y + 2.75, x + 4.25, y + 2.75);
+  } else if (chip.icon === 'rain') {
+    doc.roundedRect(x + 0.2, y + 1.65, 3.2, 1.7, 0.8, 0.8, 'S');
+    doc.line(x + 1, y + 4.1, x + 0.7, y + 4.8);
+    doc.line(x + 2.2, y + 4.1, x + 1.9, y + 4.8);
+  } else if (chip.icon === 'ticket') {
+    doc.roundedRect(x + 0.1, y + 1.55, 3.5, 2.4, 0.35, 0.35, 'S');
+    doc.line(x + 1.15, y + 1.55, x + 1.15, y + 3.95);
+  } else {
+    doc.circle(x + 1.7, y + 2.75, 1.45, 'S');
+    doc.line(x + 1.7, y + 1.65, x + 1.7, y + 3.05);
+    doc.circle(x + 1.7, y + 3.75, 0.2, 'F');
+  }
+}
+
+function drawPdfChip(doc, x, y, chip, layout) {
+  const chipWidth = getPdfChipWidth(doc, chip);
+  const colors = getPdfChipColors(chip, layout);
+  setPdfColor(doc, colors.bg, 'fill');
+  setPdfColor(doc, colors.border, 'draw');
+  doc.roundedRect(x, y, chipWidth, 5.7, 2.85, 2.85, 'FD');
+  drawPdfChipIcon(doc, chip, x + 2.2, y + 1.1, colors);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(5.85);
+  setPdfColor(doc, colors.text);
+  const text = fitPdfTextToWidth(doc, getPdfChipLabel(chip), chipWidth - 8.9);
+  const textWidth = doc.getTextWidth(text);
+  const textAreaX = x + 5.35;
+  const textAreaWidth = chipWidth - 6.35;
+  const textCenter = textAreaX + textAreaWidth / 2;
+  doc.text(text, textCenter - textWidth / 2, y + 3.55);
+  return chipWidth;
+}
+
+function drawPdfChipRow(doc, chips, x, y, width, layout) {
+  let currentX = x;
+  let currentY = y;
+  chips.forEach((chip) => {
+    const chipWidth = getPdfChipWidth(doc, chip);
+    if (currentX > x && currentX + chipWidth > x + width) {
+      currentX = x;
+      currentY += 7.3;
+    }
+    drawPdfChip(doc, currentX, currentY, chip, layout);
+    currentX += chipWidth + 2;
+  });
+  return currentY + 7;
+}
+
+function measurePdfActivity(doc, layout, place, detailed) {
+  const cardPadding = 7;
+  const contentWidth = layout.contentWidth - cardPadding * 2 - 13;
+  const titleWidth = contentWidth - 26;
+  let height = cardPadding;
+  height += doc.splitTextToSize(toPdfText(place.name), titleWidth).length * 4.8;
+  height += 3.2;
+
+  if (!detailed) return height + 8;
+
+  height += measurePdfChipRows(doc, getPdfActivityChips(place), contentWidth) * 7.3 + 4.1;
+  getPdfActivitySections(place).forEach((section) => {
+    height += 3.8;
+    height += doc.splitTextToSize(toPdfText(section.value), contentWidth).length * 3.7;
+    height += 1.1;
+  });
+  return height + cardPadding - 2.5;
+}
+
+function drawPdfActivity(doc, layout, entry, y, detailed) {
+  const { place, exportOrder } = entry;
+  const height = measurePdfActivity(doc, layout, place, detailed);
+  y = ensurePdfSpace(doc, layout, y, height);
+  const x = layout.marginX;
+  const cardTop = y;
+  const cardPadding = 7;
+  const badgeCenterX = x + cardPadding + 3.5;
+  const contentX = x + cardPadding + 13;
+  const contentWidth = layout.contentWidth - cardPadding * 2 - 13;
+  const mapsUrl = getGoogleMapsUrl(place, _globalSettings?.mapLinkStyle);
+  const linkWidth = 22;
+
+  setPdfColor(doc, '#ffffff', 'fill');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.setLineWidth(0.3);
+  doc.roundedRect(x, y, layout.contentWidth, height - 1, 3, 3, 'FD');
+
+  y += cardPadding + 2.4;
+
+  setPdfColor(doc, '#f8fafc', 'fill');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.circle(badgeCenterX, y - 0.9, 4.15, 'FD');
+  setPdfColor(doc, layout.dark, 'fill');
+  doc.circle(badgeCenterX, y - 0.9, 3.45, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(255, 255, 255);
+  doc.text(String(exportOrder), badgeCenterX, y - 0.85, { align: 'center', baseline: 'middle' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10.2);
+  setPdfColor(doc, layout.dark);
+  const titleLines = doc.splitTextToSize(toPdfText(place.name), contentWidth - linkWidth - 4);
+  doc.text(titleLines, contentX, y);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.3);
+  doc.setTextColor(37, 99, 235);
+  const linkX = x + layout.contentWidth - cardPadding - linkWidth;
+  if (typeof doc.textWithLink === 'function') {
+    doc.textWithLink('Abrir mapa', linkX, y, { url: mapsUrl });
+  } else {
+    doc.text('Abrir mapa', linkX, y);
+    doc.link(linkX, y - 3.5, linkWidth, 5, { url: mapsUrl });
+  }
+
+  y += titleLines.length * 4.8 + 0.2;
+
+  y = drawWrappedPdfText(doc, getPdfActivityMeta(place), contentX, y, contentWidth, {
+    fontSize: 7.4,
+    lineHeight: 3.7,
+    color: layout.muted,
+    bold: true
+  }) + 0.35;
+
+  if (detailed) {
+    y = drawPdfChipRow(doc, getPdfActivityChips(place), contentX, y, contentWidth, layout) + 3.8;
+
+    getPdfActivitySections(place).forEach((section) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      setPdfColor(doc, layout.muted);
+      doc.text(toPdfText(section.label).toUpperCase(), contentX, y);
+      y += 3.6;
+      y = drawWrappedPdfText(doc, section.value, contentX, y, contentWidth, {
+        fontSize: section.label === 'Nota' ? 7 : 7.2,
+        lineHeight: 3.7,
+        color: section.label === 'Nota' ? layout.muted : '#263244',
+        bold: false
+      }) + 1.4;
+    });
+  } else {
+    const priority = priorityLabels[place.priority];
+    y = drawWrappedPdfText(doc, `${place.zone || ''} · ${place.estimatedDuration || ''} · ${priority?.label || ''} · ${formatBestTimeLabel(place.bestTime)}`, contentX, y, contentWidth, {
+      fontSize: 7.6,
+      lineHeight: 4,
+      color: layout.muted
+    });
+  }
+
+  return Math.max(y + 0.8, cardTop + height + 0.8);
+}
+
+function addPdfPageNumbers(doc, layout) {
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Japon 2026 · ${page}/${pageCount}`, layout.marginX, layout.pageHeight - 7);
+  }
+}
+
+async function drawPlannerPdf(days, exportType, scopeLabel) {
+  const JsPDF = getJsPdfConstructor();
+  if (!JsPDF) return null;
+
+  const doc = new JsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const layout = createPdfLayout(doc);
+  let y = drawPdfCover(doc, layout, days, exportType);
+  const detailed = exportType === 'detailed';
+
+  for (const [index, dayData] of days.entries()) {
+    if (index > 0 && detailed) {
+      doc.addPage();
+      y = layout.marginTop;
+    } else if (index > 0) {
+      y = ensurePdfSpace(doc, layout, y, 60);
+    }
+
+    y = drawPdfDayHeader(doc, layout, dayData, y);
+    y = await drawPdfRouteMapWithFallback(doc, layout, dayData.entries, y, false);
+    dayData.entries.forEach((entry) => {
+      y = drawPdfActivity(doc, layout, entry, y, detailed);
+    });
+    y += 4;
+  }
+
+  addPdfPageNumbers(doc, layout);
+  return doc;
+}
+
+async function generatePlannerPdf({ scope, exportType, selectedDay }) {
+  const days = getExportDays(scope, selectedDay);
+  if (!days.length) {
+    showToast('No hay actividades planificadas para exportar en ese alcance.', 'info');
+    return;
+  }
+
+  try {
+    const filenameScope = scope === 'day' ? `dia-${selectedDay}` : 'viaje-completo';
+    const scopeLabel = scope === 'day' ? `Dia ${selectedDay}` : 'Todo el viaje';
+    const pdf = await drawPlannerPdf(days, exportType, scopeLabel);
+    if (!pdf) {
+      showToast('La libreria PDF no esta disponible. Recarga la pagina e intentalo de nuevo.', 'info');
+      return;
+    }
+    pdf.save(`japon-2026-itinerario-${filenameScope}-${exportType}.pdf`);
+    showToast('PDF generado correctamente.');
+    closePlannerExportModal();
+  } catch (error) {
+    console.error(error);
+    showToast('No se pudo generar el PDF. Revisa los datos del itinerario e intentalo de nuevo.', 'info');
+  }
 }
 
 function buildNav(plannerLink) {
@@ -822,6 +1937,9 @@ function renderPlannerPage() {
     <div class="modal-overlay" id="planner-modal-overlay">
       <div class="modal" id="planner-modal"></div>
     </div>
+    <div class="modal-overlay" id="planner-export-overlay">
+      <div class="modal" id="planner-export-modal"></div>
+    </div>
   `;
 
   bindMobileNav('mobile-toggle', 'mobile-menu');
@@ -852,7 +1970,8 @@ function renderPlannerMap(model) {
 
   model.routes.forEach((route) => {
     const latlngs = route.entries.map((entry) => {
-      const latlng = [entry.place.coordinates.lat, entry.place.coordinates.lng];
+      const placeLatLng = getPlaceLatLng(entry.place);
+      const latlng = [placeLatLng.lat, placeLatLng.lng];
       boundsPoints.push(latlng);
       return latlng;
     });
@@ -877,7 +1996,8 @@ function renderPlannerMap(model) {
         popupAnchor: [0, -40]
       });
 
-      const marker = L.marker([entry.place.coordinates.lat, entry.place.coordinates.lng], { icon }).addTo(_plannerMap);
+      const placeLatLng = getPlaceLatLng(entry.place);
+      const marker = L.marker([placeLatLng.lat, placeLatLng.lng], { icon }).addTo(_plannerMap);
       marker.bindPopup(`
         <div class="map-popup-content">
           <div class="popup-header">
@@ -935,6 +2055,8 @@ function attachPlannerFilterEvents() {
       document.getElementById('planner-search-input')?.focus({ preventScroll: true });
     });
   });
+
+  document.getElementById('planner-export-btn')?.addEventListener('click', openPlannerExportModal);
 
   document.querySelectorAll('[data-planner-filter-target]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1196,6 +2318,11 @@ function handlePageClick(e) {
   const overlay = e.target.closest('#planner-modal-overlay');
   if (overlay && !e.target.closest('#planner-modal')) {
     closePlaceModal();
+  }
+
+  const exportOverlay = e.target.closest('#planner-export-overlay');
+  if (exportOverlay && !e.target.closest('#planner-export-modal')) {
+    closePlannerExportModal();
   }
 }
 
