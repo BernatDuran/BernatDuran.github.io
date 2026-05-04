@@ -760,6 +760,13 @@ function calculateDayDistanceSummary(segments) {
   };
 }
 
+function getDistanceDensityLabel(totalKm) {
+  if (!Number.isFinite(totalKm) || totalKm <= 3) return 'Concentrado';
+  if (totalKm <= 7) return 'Razonable';
+  if (totalKm <= 12) return 'Disperso';
+  return 'Revisar orden';
+}
+
 function buildMapDistanceModel(routes) {
   const allSegments = [];
   let omittedCount = 0;
@@ -899,6 +906,34 @@ function getExportDaySummary(entries) {
     ticketCount: entries.filter((entry) => entry.place.requiresTicket).length,
     isSaturated: entries.length >= EXPORT_SATURATION_ACTIVITY_LIMIT || totalMinutes >= EXPORT_SATURATION_MINUTES_LIMIT
   };
+}
+
+function getExportDistanceModel(entries) {
+  const { segments, omittedCount } = buildPlannerSegments(entries);
+  const summary = calculateDayDistanceSummary(segments);
+  return {
+    segments,
+    omittedCount,
+    summary,
+    densityLabel: getDistanceDensityLabel(summary.totalDistanceKm)
+  };
+}
+
+function getPdfDaySummaryItems(dayData) {
+  const summary = getExportDaySummary(dayData.entries);
+  const distance = getExportDistanceModel(dayData.entries);
+  const longestText = distance.summary.longestSegment
+    ? `tramo más largo ${formatSegmentDistanceKm(distance.summary.longestSegment.distanceKm)}`
+    : null;
+
+  return [
+    `${summary.activityCount} actividades`,
+    `${summary.totalDurationText} visitas`,
+    `${formatTotalDistanceKm(distance.summary.totalDistanceKm)} lineales`,
+    longestText,
+    `${summary.ticketCount} con entrada/reserva`,
+    `${summary.rainyCount} aptas lluvia`
+  ].filter(Boolean);
 }
 
 function getExportDays(scope, selectedDay) {
@@ -1117,6 +1152,9 @@ function drawPdfSummaryCard(doc, x, y, width, stats, layout) {
 function drawPdfCover(doc, layout, days, exportType) {
   const totalActivities = days.reduce((sum, dayData) => sum + dayData.entries.length, 0);
   const totalMinutes = days.reduce((sum, dayData) => sum + getExportDaySummary(dayData.entries).totalMinutes, 0);
+  const totalLinearDistanceKm = days.reduce((sum, dayData) => (
+    sum + getExportDistanceModel(dayData.entries).summary.totalDistanceKm
+  ), 0);
   let y = layout.marginTop;
 
   doc.setFont('helvetica', 'bold');
@@ -1130,10 +1168,11 @@ function drawPdfCover(doc, layout, days, exportType) {
   doc.text(exportType === 'summary' ? 'Itinerario de viaje (resumen)' : 'Itinerario de viaje', layout.marginX, y);
   y += 8;
 
-  drawPdfSummaryCard(doc, layout.marginX, y, Math.min(layout.contentWidth, 118), [
+  drawPdfSummaryCard(doc, layout.marginX, y, layout.contentWidth, [
     { label: 'dias exportados', value: String(days.length) },
     { label: 'actividades', value: String(totalActivities) },
-    { label: 'visitas estimadas', value: formatDurationMinutes(totalMinutes, { approximate: true }) || 'N/D' }
+    { label: 'visitas estimadas', value: formatDurationMinutes(totalMinutes, { approximate: true }) || 'N/D' },
+    { label: 'distancia lineal total', value: formatTotalDistanceKm(totalLinearDistanceKm) }
   ], layout);
   y += 17;
 
@@ -1145,7 +1184,7 @@ function drawPdfCover(doc, layout, days, exportType) {
 
 function drawPdfDayHeader(doc, layout, dayData, y) {
   const summary = getExportDaySummary(dayData.entries);
-  y = ensurePdfSpace(doc, layout, y, 24);
+  y = ensurePdfSpace(doc, layout, y, 32);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
@@ -1163,6 +1202,14 @@ function drawPdfDayHeader(doc, layout, dayData, y) {
   setPdfColor(doc, layout.muted);
   doc.text(toPdfText(summary.mainLabel || 'Ruta del dia'), layout.marginX, y);
   y += 5;
+
+  const summaryLine = getPdfDaySummaryItems(dayData).join(' · ');
+  y = drawWrappedPdfText(doc, summaryLine, layout.marginX, y, layout.contentWidth, {
+    fontSize: 7.6,
+    lineHeight: 3.8,
+    color: '#475569',
+    bold: true
+  }) + 3;
 
   if (summary.isSaturated) {
     setPdfColor(doc, '#fff7ed', 'fill');
@@ -1471,6 +1518,324 @@ async function drawPdfRouteMapWithFallback(doc, layout, entries, y, compact = fa
   return y + mapHeight + 5;
 }
 
+function getPdfDistanceBlockHeight(distanceModel, detailed) {
+  if (!detailed) return 30;
+  const segmentRows = Math.max(distanceModel.segments.length, 1);
+  const warningHeight = distanceModel.omittedCount ? 8 : 0;
+  return 42 + warningHeight + segmentRows * 9.2;
+}
+
+function getDistanceKpiIconSvg(icon) {
+  const icons = {
+    ruler: `
+      <svg class="distance-kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0z"/>
+        <path d="m14.5 12.5 2-2"/>
+        <path d="m11.5 9.5 2-2"/>
+        <path d="m8.5 6.5 2-2"/>
+        <path d="m17.5 15.5 2-2"/>
+      </svg>
+    `,
+    segments: `
+      <svg class="distance-kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="5" cy="19" r="2.5"/>
+        <circle cx="12" cy="5" r="2.5"/>
+        <circle cx="19" cy="19" r="2.5"/>
+        <path d="M6.2 16.8 10.8 7.2"/>
+        <path d="m13.2 7.2 4.6 9.6"/>
+      </svg>
+    `,
+    mountain: `
+      <svg class="distance-kpi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m8 3 4 8 5-5 5 15H2L8 3z"/>
+      </svg>
+    `
+  };
+  return icons[icon] || icons.ruler;
+}
+
+function renderDistanceKpiCard({ icon, value, label }) {
+  return `
+    <div class="distance-kpi-card">
+      ${getDistanceKpiIconSvg(icon)}
+      <div>
+        <div class="distance-kpi-value">${escapeHtml(value)}</div>
+        <div class="distance-kpi-label">${escapeHtml(label)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDistanceKpiCards(stats) {
+  return `
+    <div class="distance-kpi-grid">
+      ${stats.map(renderDistanceKpiCard).join('')}
+    </div>
+  `;
+}
+
+function createPdfHtmlCaptureHost(html, widthPx, heightPx) {
+  const host = document.createElement('div');
+  host.style.cssText = `
+    position: fixed;
+    left: -12000px;
+    top: 0;
+    width: ${widthPx}px;
+    min-height: ${heightPx}px;
+    background: #ffffff;
+    z-index: -1;
+    pointer-events: none;
+  `;
+  host.innerHTML = html;
+  document.body.appendChild(host);
+  return host;
+}
+
+async function captureDistanceKpiCardsForPdf(stats, widthPx) {
+  const html2canvas = getHtml2Canvas();
+  if (!html2canvas || typeof document === 'undefined') return null;
+
+  const heightPx = 64;
+  const html = `
+    <style>
+      .distance-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin: 0;
+        width: ${widthPx}px;
+        box-sizing: border-box;
+        font-family: Arial, sans-serif;
+      }
+      .distance-kpi-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 64px;
+        padding: 12px 16px;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        box-sizing: border-box;
+      }
+      .distance-kpi-icon {
+        width: 26px;
+        height: 26px;
+        color: #ef476f;
+        flex: 0 0 auto;
+      }
+      .distance-kpi-value {
+        font-size: 19px;
+        line-height: 1.1;
+        font-weight: 700;
+        color: #0f172a;
+        white-space: nowrap;
+      }
+      .distance-kpi-label {
+        margin-top: 3px;
+        font-size: 11px;
+        line-height: 1.2;
+        color: #64748b;
+        white-space: nowrap;
+      }
+    </style>
+    ${renderDistanceKpiCards(stats)}
+  `;
+  const host = createPdfHtmlCaptureHost(html, widthPx, heightPx);
+
+  try {
+    const canvas = await html2canvas(host, {
+      backgroundColor: '#ffffff',
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      scale: 4,
+      width: widthPx,
+      height: heightPx,
+      windowWidth: widthPx,
+      windowHeight: heightPx
+    });
+    return {
+      dataUrl: canvas.toDataURL('image/png'),
+      widthPx,
+      heightPx
+    };
+  } catch (error) {
+    console.warn('No se pudieron capturar los KPIs de distancia para el PDF.', error);
+    return null;
+  } finally {
+    host.remove();
+  }
+}
+
+function drawPdfDistanceKpiFallback(doc, layout, stats, x, y, width) {
+  const gap = 4;
+  const cardHeight = 17;
+  const statWidth = (width - gap * 2) / 3;
+  stats.forEach((stat, index) => {
+    const cardX = x + (statWidth + gap) * index;
+    setPdfColor(doc, '#ffffff', 'fill');
+    setPdfColor(doc, layout.softBorder, 'draw');
+    doc.setLineWidth(0.3);
+    doc.roundedRect(cardX, y, statWidth, cardHeight, 3, 3, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    setPdfColor(doc, layout.dark);
+    doc.text(toPdfText(stat.value), cardX + 5, y + 7);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.4);
+    setPdfColor(doc, layout.muted);
+    doc.text(toPdfText(stat.label), cardX + 5, y + 12.2);
+  });
+  return y + cardHeight + 4;
+}
+
+function drawPdfDistanceTitleIcon(doc, x, y, color) {
+  setPdfColor(doc, color, 'draw');
+  doc.setLineWidth(0.45);
+  doc.line(x + 1.4, y + 5, x + 4.4, y + 1.7);
+  doc.line(x + 5.2, y + 1.7, x + 8.2, y + 5);
+  setPdfColor(doc, '#ffffff', 'fill');
+  setPdfColor(doc, color, 'draw');
+  doc.circle(x + 1, y + 5.4, 1.05, 'FD');
+  doc.circle(x + 4.8, y + 1.3, 1.05, 'FD');
+  doc.circle(x + 8.6, y + 5.4, 1.05, 'FD');
+}
+
+function drawPdfOrderArrow(doc, layout, fromX, toX, y) {
+  const startX = fromX + 3.3;
+  const endX = toX - 3.3;
+  setPdfColor(doc, layout.muted, 'draw');
+  doc.setLineWidth(0.35);
+  doc.line(startX, y, endX, y);
+  doc.line(endX, y, endX - 1.2, y - 0.9);
+  doc.line(endX, y, endX - 1.2, y + 0.9);
+}
+
+async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
+  const distance = getExportDistanceModel(dayData.entries);
+  const height = getPdfDistanceBlockHeight(distance, detailed);
+  y = ensurePdfSpace(doc, layout, y, height + 4);
+
+  const x = layout.marginX;
+  const cardTop = y;
+  const width = layout.contentWidth;
+  setPdfColor(doc, '#ffffff', 'fill');
+  setPdfColor(doc, layout.softBorder, 'draw');
+  doc.setLineWidth(0.35);
+  doc.roundedRect(x, y, width, height, 4, 4, 'FD');
+
+  y += 9;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  setPdfColor(doc, layout.dark);
+  drawPdfDistanceTitleIcon(doc, x + 4, y - 5.3, layout.dark);
+  doc.text('Distancias lineales del día', x + 16, y);
+  y += 8;
+
+  const longestText = distance.summary.longestSegment
+    ? formatSegmentDistanceKm(distance.summary.longestSegment.distanceKm)
+    : 'N/D';
+
+  if (!detailed) {
+    const line = [
+      `${formatTotalDistanceKm(distance.summary.totalDistanceKm)} lineales`,
+      `${distance.summary.segmentCount} tramos`,
+      `tramo más largo ${longestText}`,
+      `dispersion: ${distance.densityLabel}`
+    ].join(' · ');
+    y = drawWrappedPdfText(doc, line, x + 5, y + 2, width - 10, {
+      fontSize: 8,
+      lineHeight: 3.8,
+      color: layout.muted,
+      bold: true
+    });
+    return cardTop + height + 4;
+  }
+
+  const kpiStats = [{
+    icon: 'ruler',
+    value: formatTotalDistanceKm(distance.summary.totalDistanceKm),
+    label: 'distancia lineal total'
+  }, {
+    icon: 'segments',
+    value: String(distance.summary.segmentCount),
+    label: 'tramos'
+  }, {
+    icon: 'mountain',
+    value: longestText,
+    label: 'tramo más largo'
+  }];
+  const kpiWidthMm = width - 8;
+  const cssPxPerMm = 96 / 25.4;
+  const kpiCaptureWidthPx = Math.round(kpiWidthMm * cssPxPerMm);
+  const kpiImage = await captureDistanceKpiCardsForPdf(kpiStats, kpiCaptureWidthPx);
+  if (kpiImage) {
+    const kpiHeightMm = kpiWidthMm * (kpiImage.heightPx / kpiImage.widthPx);
+    doc.addImage(kpiImage.dataUrl, 'PNG', x + 4, y, kpiWidthMm, kpiHeightMm);
+    y += kpiHeightMm + 4;
+  } else {
+    y = drawPdfDistanceKpiFallback(doc, layout, kpiStats, x + 4, y, width - 8);
+  }
+
+  if (distance.omittedCount) {
+    setPdfColor(doc, '#fffbeb', 'fill');
+    setPdfColor(doc, '#fde68a', 'draw');
+    doc.roundedRect(x + 4, y, width - 8, 6, 2, 2, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.2);
+    setPdfColor(doc, '#92400e');
+    doc.text('Algunos tramos pueden omitirse si faltan coordenadas', x + 8, y + 4);
+    y += 8;
+  }
+
+  if (!distance.segments.length) {
+    y = drawWrappedPdfText(doc, 'Sin tramos calculables en linea recta.', x + 5, y + 3, width - 10, {
+      fontSize: 7,
+      lineHeight: 3.6,
+      color: layout.muted
+    });
+    return cardTop + height + 4;
+  }
+
+  distance.segments.forEach((segment) => {
+    const rowTop = y;
+    setPdfColor(doc, layout.softBorder, 'draw');
+    doc.setLineWidth(0.25);
+    doc.line(x + 4, rowTop + 7.2, x + width - 4, rowTop + 7.2);
+
+    setPdfColor(doc, '#ffffff', 'fill');
+    setPdfColor(doc, layout.softBorder, 'draw');
+    doc.setLineWidth(0.3);
+    doc.circle(x + 8, rowTop + 3.6, 2.35, 'FD');
+    doc.circle(x + 18.5, rowTop + 3.6, 2.35, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.4);
+    setPdfColor(doc, layout.muted);
+    doc.text(String(segment.fromOrder), x + 8, rowTop + 3.65, { align: 'center', baseline: 'middle' });
+    doc.text(String(segment.toOrder), x + 18.5, rowTop + 3.65, { align: 'center', baseline: 'middle' });
+    drawPdfOrderArrow(doc, layout, x + 8, x + 18.5, rowTop + 3.6);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    setPdfColor(doc, layout.dark);
+    const nameText = fitPdfTextToWidth(
+      doc,
+      `${segment.fromPlace.name} -> ${segment.toPlace.name}`,
+      width - 64
+    );
+    doc.text(nameText, x + 30, rowTop + 4.2);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
+    setPdfColor(doc, layout.dark);
+    doc.text(formatSegmentDistanceKm(segment.distanceKm), x + width - 5, rowTop + 4.2, { align: 'right' });
+    y += 9.2;
+  });
+
+  return cardTop + height + 4;
+}
+
 function getPdfActivityMeta(place) {
   const category = categories.find((item) => item.id === place.category);
   return `${getCityName(place.cityId)} · ${place.zone || 'Zona pendiente'} · ${category?.label || place.category || 'Categoria'}`;
@@ -1529,7 +1894,11 @@ function getPdfChipColors(chip, layout) {
 function getPdfChipWidth(doc, chip) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.85);
-  return Math.min(Math.max(doc.getTextWidth(toPdfText(getPdfChipLabel(chip))) + 9.3, 18), 64);
+  const textWidth = doc.getTextWidth(toPdfText(getPdfChipLabel(chip)));
+  if (chip?.icon === 'score') {
+    return Math.min(Math.max(textWidth + 7.4, 15.8), 20);
+  }
+  return Math.min(Math.max(textWidth + 9.3, 18), 64);
 }
 
 function fitPdfTextToWidth(doc, text, width) {
@@ -1616,17 +1985,18 @@ function drawPdfChipIcon(doc, chip, x, y, colors) {
 function drawPdfChip(doc, x, y, chip, layout) {
   const chipWidth = getPdfChipWidth(doc, chip);
   const colors = getPdfChipColors(chip, layout);
+  const isScoreChip = chip?.icon === 'score';
   setPdfColor(doc, colors.bg, 'fill');
   setPdfColor(doc, colors.border, 'draw');
   doc.roundedRect(x, y, chipWidth, 5.7, 2.85, 2.85, 'FD');
-  drawPdfChipIcon(doc, chip, x + 2.2, y + 1.1, colors);
+  drawPdfChipIcon(doc, chip, x + (isScoreChip ? 1.75 : 2.2), y + 1.1, colors);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(5.85);
   setPdfColor(doc, colors.text);
-  const text = fitPdfTextToWidth(doc, getPdfChipLabel(chip), chipWidth - 8.9);
+  const text = fitPdfTextToWidth(doc, getPdfChipLabel(chip), chipWidth - (isScoreChip ? 7.2 : 8.9));
   const textWidth = doc.getTextWidth(text);
-  const textAreaX = x + 5.35;
-  const textAreaWidth = chipWidth - 6.35;
+  const textAreaX = x + (isScoreChip ? 4.55 : 5.35);
+  const textAreaWidth = chipWidth - (isScoreChip ? 5.45 : 6.35);
   const textCenter = textAreaX + textAreaWidth / 2;
   doc.text(text, textCenter - textWidth / 2, y + 3.55);
   return chipWidth;
@@ -1780,6 +2150,7 @@ async function drawPlannerPdf(days, exportType, scopeLabel) {
 
     y = drawPdfDayHeader(doc, layout, dayData, y);
     y = await drawPdfRouteMapWithFallback(doc, layout, dayData.entries, y, false);
+    y = await drawPdfDistanceBlock(doc, layout, dayData, y, detailed);
     dayData.entries.forEach((entry) => {
       y = drawPdfActivity(doc, layout, entry, y, detailed);
     });
