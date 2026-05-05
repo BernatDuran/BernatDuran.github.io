@@ -319,7 +319,7 @@ body.nav-mobile-open { overflow: hidden; }
 .planner-day-summary-sep { color: var(--border); }
 .planner-day-cards { padding: var(--space-sm); display: flex; flex-direction: column; gap: var(--space-sm); min-height: 60px; }
 
-/* Mini cards â€” 3 column: icon | info block | chip button */
+/* Mini cards - 3 column: icon | info block | chip button */
 .planner-mini-card { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-light); border-radius: var(--radius-md); transition: var(--transition-fast); cursor: pointer; }
 .planner-mini-card:hover { box-shadow: var(--shadow-sm); border-color: var(--border); background: var(--bg-card); }
 .planner-card-discarded { opacity: 0.45; }

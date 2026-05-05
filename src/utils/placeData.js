@@ -28,7 +28,9 @@ export const BEST_TIME_OPTIONS = [
 ];
 
 const BEST_TIME_LABELS = Object.fromEntries(BEST_TIME_OPTIONS.map((option) => [option.value, option.label]));
-const SUSPICIOUS_MOJIBAKE_PATTERN = /[ÃÂÅÆæð]/;
+const SUSPICIOUS_MOJIBAKE_PATTERN = /[\u00c3\u00c2\u00c5\u00c6\u00e6\u00f0]/;
+const LEGACY_MOJIBAKE_MORNING = 'ma\u00e3\u00b1ana';
+const REPLACEMENT_CHARACTER = '\uFFFD';
 
 export function repairMojibakeText(value) {
   if (typeof value !== 'string') return value;
@@ -38,7 +40,7 @@ export function repairMojibakeText(value) {
     const bytes = Uint8Array.from(Array.from(value, (char) => char.charCodeAt(0) & 0xff));
     const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
     if (!decoded) return value;
-    if (decoded.includes('�') && !value.includes('�')) return value;
+    if (decoded.includes(REPLACEMENT_CHARACTER) && !value.includes(REPLACEMENT_CHARACTER)) return value;
     return decoded;
   } catch {
     return value;
@@ -100,7 +102,7 @@ export function normalizeBestTimeValue(value) {
     .replace(/[\u0300-\u036f]/g, '');
 
   if (!normalized) return 'cualquier-momento';
-  if (raw.includes('mañana') || raw.includes('maã±ana') || normalized.includes('manana') || normalized.includes('madrugada')) return 'mañana';
+  if (raw.includes('mañana') || raw.includes(LEGACY_MOJIBAKE_MORNING) || normalized.includes('manana') || normalized.includes('madrugada')) return 'mañana';
   if (raw.includes('atardecer') || raw.includes('tarde') || raw.includes('almuerzo') || normalized.includes('atardecer') || normalized.includes('tarde') || normalized.includes('almuerzo')) return 'tarde';
   if (raw.includes('noche') || raw.includes('nocturno') || raw.includes('cena') || normalized.includes('noche') || normalized.includes('nocturno') || normalized.includes('cena')) return 'noche';
   if (raw.includes('cualquier') || raw.includes('todo el d') || normalized.includes('cualquier') || normalized.includes('todo el dia')) return 'cualquier-momento';
