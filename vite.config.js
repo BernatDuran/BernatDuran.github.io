@@ -13,19 +13,19 @@ export default defineConfig({
         city: resolve(rootDir, 'city.html'),
         tools: resolve(rootDir, 'tools.html'),
         admin: resolve(rootDir, 'admin.html'),
-        planner: resolve(rootDir, 'planner.html'),
-      },
-    },
+        planner: resolve(rootDir, 'planner.html')
+      }
+    }
   },
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icon.svg', 'icons.svg'],
       devOptions: {
-        enabled: true
+        enabled: false
       },
       workbox: {
-        // IMPORTANTE: Desactivamos el fallback a index.html para que city.html y otras páginas funcionen como archivos independientes
+        // Keep multipage routes as standalone files instead of falling back to index.html.
         navigateFallback: null,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}']
       },
