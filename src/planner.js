@@ -1,10 +1,11 @@
 ﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
+import './styles/maps.css';
 import { getAll, putAll } from './utils/db.js';
 import { categories, priorityLabels } from './data/cities.js';
 import { icons, formatScore, debounce, parseEstimatedDurationToMinutes, formatDurationMinutes } from './utils/helpers.js';
-import { renderPlaceMap, getGoogleMapsUrl } from './utils/maps.js';
+import { initLeafletMap, renderPlaceMap, getGoogleMapsRouteUrl, getGoogleMapsUrl, renderPlannerTravelMap } from './utils/maps.js';
 import { registerSW } from 'virtual:pwa-register';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
@@ -667,7 +668,16 @@ function renderMapLegend(model) {
 
   const chips = model.routes
     .filter((route) => route.entries.length > 0)
-    .map((route) => `<span class="planner-map-legend-chip"><span class="planner-map-legend-dot" style="background:${route.color};"></span>D&iacute;a ${route.day}</span>`)
+    .map((route) => {
+      const { segments, omittedCount } = buildPlannerSegments(route.allEntries || route.entries);
+      const summary = calculateDayDistanceSummary(segments);
+      const meta = [
+        `${route.entries.length} ubic.`,
+        summary.segmentCount ? formatTotalDistanceKm(summary.totalDistanceKm) : '',
+        omittedCount ? `${omittedCount} sin coord.` : ''
+      ].filter(Boolean).join(' &middot; ');
+      return `<span class="planner-map-legend-chip"><span class="planner-map-legend-dot" style="background:${route.color};"></span>D&iacute;a ${route.day}${meta ? ` &middot; ${meta}` : ''}</span>`;
+    })
     .join('');
 
   if (!chips) return '';
@@ -683,7 +693,7 @@ function renderMapMissingList(model) {
     .join('');
 
   const more = model.missingEntries.length > 12
-    ? `<div class="planner-m&aacute;s sin coordenadas</div>`
+    ? `<div class="planner-map-missing-more">+${model.missingEntries.length - 12} m&aacute;s sin coordenadas</div>`
     : '';
 
   return `
@@ -833,6 +843,24 @@ function renderDistanceSegmentsList(model) {
   `;
 }
 
+function renderPlannerMapRouteAction(model) {
+  if (model.scope === 'all') return '';
+
+  const route = model.routes.find((candidate) => candidate.day === model.scope);
+  const validEntries = route?.entries || [];
+  const routeUrl = getGoogleMapsRouteUrl(validEntries, { travelMode: 'walking', maxWaypoints: 8 });
+  const disabledClass = routeUrl ? '' : ' is-disabled';
+  const href = routeUrl || '#';
+
+  return `
+    <div class="planner-map-route-actions">
+      <a class="planner-map-route-link${disabledClass}" href="${href}" target="_blank" rel="noopener" aria-disabled="${routeUrl ? 'false' : 'true'}">
+        Abrir ruta en Google Maps
+      </a>
+    </div>
+  `;
+}
+
 function renderMapPanel(model) {
   let emptyMessage = '';
   if (model.plannedCount === 0) {
@@ -849,6 +877,7 @@ function renderMapPanel(model) {
       </div>
 
       ${renderMapLegend(model)}
+      ${renderPlannerMapRouteAction(model)}
 
       <div class="planner-map-content-grid">
         <div class="planner-map-shell">
@@ -2330,85 +2359,21 @@ function renderPlannerMap(model) {
   const mapContainer = document.getElementById('planner-map-container');
   if (!mapContainer || model.mappedCount === 0 || typeof L === 'undefined') return;
 
-  _plannerMap = L.map('planner-map-container').setView([DEFAULT_MAP_CENTER.lat, DEFAULT_MAP_CENTER.lng], 5);
-
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
-    maxZoom: 19
-  }).addTo(_plannerMap);
-
-  const boundsPoints = [];
-
-  model.routes.forEach((route) => {
-    const latlngs = route.entries.map((entry) => {
-      const placeLatLng = getPlaceLatLng(entry.place);
-      const latlng = [placeLatLng.lat, placeLatLng.lng];
-      boundsPoints.push(latlng);
-      return latlng;
-    });
-
-    route.entries.forEach((entry) => {
-      const cat = categories.find((c) => c.id === entry.place.category);
-      const prio = priorityLabels[entry.place.priority];
-      const scoreText = formatScore(entry.place.score);
-      const orderLabel = (entry.item?.order ?? 0) + 1;
-      const iconHtml = `
-        <div class="planner-route-marker" style="--route-color:${route.color};">
-          <span class="planner-route-emoji">${cat?.icon || '&#x1F4CD;'}</span>
-          <span class="planner-route-day-badge">D${entry.day} (#${orderLabel})</span>
-        </div>
-      `;
-
-      const icon = L.divIcon({
-        className: 'planner-route-icon',
-        html: iconHtml,
-        iconSize: [42, 42],
-        iconAnchor: [21, 42],
-        popupAnchor: [0, -40]
-      });
-
-      const placeLatLng = getPlaceLatLng(entry.place);
-      const marker = L.marker([placeLatLng.lat, placeLatLng.lng], { icon }).addTo(_plannerMap);
-      marker.bindPopup(`
-        <div class="map-popup-content">
-          <div class="popup-header">
-            <span class="popup-emoji">${cat?.icon || '&#x1F4CD;'}</span>
-            <strong>${escapeHtml(entry.place.name)}</strong>
-          </div>
-          <div class="popup-meta">
-            <span class="popup-type">D&iacute;a ${entry.day} &middot; ${escapeHtml(entry.place.type || '')}</span>
-            <div class="planner-map-popup-details">
-              <span class="popup-priority" style="background:${route.color}; color:#fff;">Ruta D&iacute;a ${entry.day}</span>
-              ${prio ? `<span class="planner-map-popup-chip" title="${escapeHtml(prio.label)}">${prio.icon}</span>` : ''}
-              ${scoreText ? `<span class="planner-map-popup-chip">&#x2B50; ${scoreText}</span>` : ''}
-              ${entry.place.estimatedDuration ? `<span class="planner-map-popup-chip">${icons.clock} ${escapeHtml(entry.place.estimatedDuration)}</span>` : ''}
-            </div>
-          </div>
-          <button class="popup-btn planner-map-popup-btn" data-place-id="${entry.place.id}">Ver detalles</button>
-        </div>
-      `);
-    });
-
-    if (latlngs.length >= 2) {
-      L.polyline(latlngs, {
-        color: route.color,
-        weight: 3,
-        opacity: model.scope === 'all' ? 0.7 : 0.85,
-        lineJoin: 'round'
-      }).addTo(_plannerMap);
-    }
+  _plannerMap = initLeafletMap('planner-map-container', DEFAULT_MAP_CENTER, 5, {
+    controls: true,
+    showLocate: true,
+    showFullscreen: true,
+    showFitBounds: true
   });
 
-  if (boundsPoints.length === 1) {
-    _plannerMap.setView(boundsPoints[0], 14);
-  } else if (boundsPoints.length > 1) {
-    _plannerMap.fitBounds(boundsPoints, { padding: [40, 40] });
-  }
-
-  setTimeout(() => {
-    _plannerMap?.invalidateSize({ pan: false });
-  }, 0);
+  renderPlannerTravelMap(_plannerMap, model, {
+    categories,
+    priorityLabels,
+    citiesArray: _citiesArray,
+    formatScore,
+    mapLinkStyle: _globalSettings?.mapLinkStyle,
+    onPlaceClick: openModal
+  });
 }
 
 function attachPlannerFilterEvents() {

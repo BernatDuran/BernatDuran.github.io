@@ -1,0 +1,382 @@
+.travel-map-shell {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xl);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.travel-map-container,
+.city-map-container,
+.planner-map-container,
+.modal-map {
+  isolation: isolate;
+}
+
+.travel-map-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.travel-map-control-group {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.travel-map-control-btn {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.travel-map-control-btn:last-child {
+  border-bottom: 0;
+}
+
+.travel-map-control-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--accent);
+}
+
+.travel-map-control-btn:active {
+  transform: scale(0.96);
+}
+
+.travel-marker-leaflet,
+.travel-marker-numbered-leaflet,
+.travel-marker-mini-leaflet {
+  background: transparent;
+  border: 0;
+}
+
+.travel-marker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+}
+
+.travel-marker-v2 {
+  width: 38px;
+  height: 38px;
+  border: 3px solid #cbd5e1;
+}
+
+.travel-marker-v2.priority-must-see {
+  border-color: #ef4444;
+}
+
+.travel-marker-v2.priority-recommended {
+  border-color: #f59e0b;
+}
+
+.travel-marker-v2.priority-optional {
+  border-color: #60a5fa;
+}
+
+.travel-marker-emoji {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.travel-marker-badge {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.travel-marker-in-tray {
+  border-style: dashed;
+}
+
+.travel-marker-done::after {
+  content: "\2713";
+  position: absolute;
+  left: -7px;
+  bottom: -7px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.travel-marker-discarded,
+.travel-marker-dimmed {
+  opacity: 0.5;
+  filter: grayscale(0.5);
+}
+
+.travel-marker-rainy::before {
+  content: "\2602";
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0284c7;
+  font-size: 0.72rem;
+}
+
+.travel-marker-numbered {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #fff;
+  background: var(--travel-marker-color, var(--accent));
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.24);
+}
+
+.travel-marker-order {
+  transform: translateY(-1px);
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.travel-marker-mini {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--accent);
+}
+
+.travel-map-popup {
+  width: min(300px, calc(100vw - 48px));
+  color: var(--text-primary);
+}
+
+.travel-map-popup-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.travel-map-popup-icon,
+.travel-map-popup-order {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  font-weight: 900;
+}
+
+.travel-map-popup-order {
+  background: var(--travel-marker-color, var(--accent));
+  color: #fff;
+}
+
+.travel-map-popup-title {
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.travel-map-popup-meta {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.travel-map-popup-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.travel-map-popup-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.travel-map-popup-badge.priority-must-see {
+  background: #fff1f2;
+  color: #e11d48;
+}
+
+.travel-map-popup-badge.priority-recommended {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.travel-map-popup-badge.priority-optional {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.travel-map-popup-badge.is-planned {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+
+.travel-map-popup-badge.is-done {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.travel-map-popup-badge.is-discarded {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.travel-map-popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.travel-map-popup-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.travel-map-popup-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.travel-map-popup-btn-secondary {
+  background: #fff;
+  color: var(--text-primary);
+}
+
+.travel-map-tooltip-shell {
+  border: 0;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+}
+
+.travel-map-tooltip {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+}
+
+.travel-map-tooltip span {
+  opacity: 0.82;
+}
+
+.travel-map-fullscreen,
+.travel-map-shell:fullscreen,
+.city-map-section:fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background: var(--bg-primary);
+}
+
+.travel-map-fullscreen .city-map-container,
+.travel-map-shell:fullscreen .planner-map-container,
+.city-map-section:fullscreen .city-map-container {
+  height: 100vh;
+  min-height: 100vh;
+  border-radius: 0;
+}
+
+.planner-map-route-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -4px;
+}
+
+.planner-map-route-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 0.82rem;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.planner-map-route-link.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .travel-map-control-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .travel-map-popup {
+    width: calc(100vw - 40px);
+  }
+
+  .travel-marker-numbered {
+    width: 32px;
+    height: 32px;
+  }
+}

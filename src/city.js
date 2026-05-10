@@ -1,6 +1,7 @@
 ﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
+import './styles/maps.css';
 import { categories, priorityLabels } from './data/cities.js';
 import { filterPlaces, getZones } from './utils/filters.js';
 import { icons, formatScore, debounce, getTimeIcon } from './utils/helpers.js';
@@ -276,13 +277,28 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       if (placeholder) {
         placeholder.replaceWith(savedMapElement);
       }
-      updateMapMarkers(mapInstance, filtered, openModal);
+      updateMapMarkers(mapInstance, filtered, openModal, {
+        plannerItems,
+        mapLinkStyle: globalSettings?.mapLinkStyle,
+        formatScore,
+        fitBounds: true
+      });
     } else {
       const mapContainer = document.getElementById('city-map-container');
       if (mapContainer && !mapInstance) {
         setTimeout(() => {
-          mapInstance = initLeafletMap('city-map-container', cityMeta.center, cityMeta.defaultZoom);
-          updateMapMarkers(mapInstance, filtered, openModal);
+          mapInstance = initLeafletMap('city-map-container', cityMeta.center, cityMeta.defaultZoom, {
+            controls: true,
+            showLocate: true,
+            showFullscreen: true,
+            showFitBounds: true
+          });
+          updateMapMarkers(mapInstance, filtered, openModal, {
+            plannerItems,
+            mapLinkStyle: globalSettings?.mapLinkStyle,
+            formatScore,
+            fitBounds: true
+          });
         }, 100);
       }
     }

@@ -1,113 +1,189 @@
 import { categories, priorityLabels } from '../data/cities.js';
 import { getPlaceLatLng } from './placeData.js';
+import {
+  addTravelMapControls,
+  clearAllTravelLayers,
+  createMapLayerState,
+  createTravelMap,
+  destroyTravelMap,
+  ensureLayerGroup,
+  fitMapToEntries,
+  fitMapToPlaces,
+  getLatLngFromPlace,
+  invalidateTravelMapSize,
+  renderPlaceMarkers,
+  renderPlannerMarkers,
+  renderPlannerRoutes
+} from './travelMap/index.js';
 
-let currentMap = null;
-let currentMarkers = [];
+const mapStates = new WeakMap();
 
-export function initLeafletMap(containerId, center, zoom) {
-  // If map already exists, remove it
-  if (currentMap) {
-    currentMap.remove();
+function getState(map) {
+  if (!map) return null;
+  if (!mapStates.has(map)) {
+    mapStates.set(map, createMapLayerState());
+  }
+  return mapStates.get(map);
+}
+
+function locateUser(map, state) {
+  if (!navigator.geolocation || !map) {
+    console.warn('Geolocation no esta disponible en este navegador.');
+    return;
   }
 
-  // Initialize new map
-  // We use Leaflet global object 'L' which is loaded via CDN
-  currentMap = L.map(containerId).setView([center.lat, center.lng], zoom);
-
-  // Add OpenStreetMap tiles
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
-    maxZoom: 19
-  }).addTo(currentMap);
-
-  return currentMap;
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      const layer = ensureLayerGroup(map, state, 'location');
+      layer.clearLayers();
+      const latLng = [coords.latitude, coords.longitude];
+      L.circleMarker(latLng, {
+        radius: 8,
+        color: '#2563eb',
+        weight: 3,
+        fillColor: '#60a5fa',
+        fillOpacity: 0.85
+      }).addTo(layer);
+      map.setView(latLng, Math.max(map.getZoom(), 14));
+    },
+    (error) => console.warn('No se pudo obtener la ubicacion actual.', error),
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
 }
 
-export function updateMapMarkers(map, places, openModalCallback) {
-  // Clear existing markers
-  currentMarkers.forEach(marker => marker.remove());
-  currentMarkers = [];
-
-  // Add new markers
-  places.forEach(place => {
-    const latLng = getPlaceLatLng(place);
-    if (!latLng) return;
-
-    const cat = categories.find(c => c.id === place.category);
-    const prio = priorityLabels[place.priority];
-    
-    // Create custom icon
-    const iconHtml = `<div class="custom-marker priority-${place.priority}">
-      <span class="marker-emoji">${cat?.icon || '📍'}</span>
-    </div>`;
-
-    const customIcon = L.divIcon({
-      className: 'custom-leaflet-icon',
-      html: iconHtml,
-      iconSize: [36, 36],
-      iconAnchor: [18, 36],
-      popupAnchor: [0, -36]
-    });
-
-    // Create marker
-    const marker = L.marker([latLng.lat, latLng.lng], { icon: customIcon }).addTo(map);
-
-    // Create popup content
-    const popupContent = document.createElement('div');
-    popupContent.className = 'map-popup-content';
-    popupContent.innerHTML = `
-      <div class="popup-header">
-        <span class="popup-emoji">${cat?.icon || '📍'}</span>
-        <strong>${place.name}</strong>
-      </div>
-      <div class="popup-meta">
-        <span class="popup-type">${place.type}</span>
-        <span class="popup-priority ${prio.class}">${prio.label}</span>
-      </div>
-      <button class="popup-btn">Ver detalles</button>
-    `;
-
-    // Add click event to button inside popup
-    popupContent.querySelector('.popup-btn').addEventListener('click', () => {
-      openModalCallback(place);
-    });
-
-    marker.bindPopup(popupContent);
-    currentMarkers.push(marker);
+export function initLeafletMap(containerId, center, zoom, options = {}) {
+  const map = createTravelMap(containerId, {
+    center,
+    zoom,
+    scrollWheelZoom: options.scrollWheelZoom ?? true,
+    dragging: options.dragging ?? true,
+    zoomControl: options.zoomControl ?? false,
+    attributionControl: options.attributionControl ?? true,
+    className: options.className
   });
+
+  if (!map) return null;
+  const state = getState(map);
+
+  if (options.controls !== false) {
+    addTravelMapControls(map, {
+      showLocate: options.showLocate ?? true,
+      showFullscreen: options.showFullscreen ?? true,
+      showFitBounds: options.showFitBounds ?? true,
+      showZoom: options.showZoom ?? true,
+      onLocate: () => locateUser(map, state),
+      onFitBounds: () => {
+        if (state.currentEntries?.length) {
+          fitMapToEntries(map, state.currentEntries);
+        } else {
+          fitMapToPlaces(map, state.currentPlaces || []);
+        }
+      }
+    });
+  }
+
+  return map;
 }
 
-export function renderPlaceMap(containerId, place) {
+export function updateMapMarkers(map, places, openModalCallback, options = {}) {
+  if (!map) return;
+  const state = getState(map);
+  const markersLayer = ensureLayerGroup(map, state, 'markers');
+  state.currentPlaces = places || [];
+
+  renderPlaceMarkers(map, places || [], {
+    layerGroup: markersLayer,
+    categories: options.categories || categories,
+    priorityLabels: options.priorityLabels || priorityLabels,
+    plannerItems: options.plannerItems,
+    mapLinkStyle: options.mapLinkStyle,
+    formatScore: options.formatScore,
+    showTooltip: options.showTooltip,
+    markerMode: options.markerMode,
+    getGoogleMapsUrl,
+    onPlaceClick: openModalCallback
+  });
+
+  if (options.fitBounds) {
+    fitMapToPlaces(map, places || [], options.fitBoundsOptions);
+  }
+
+  invalidateTravelMapSize(map);
+}
+
+export function renderPlannerTravelMap(map, model, options = {}) {
+  if (!map || !model) return;
+  const state = getState(map);
+  const markersLayer = ensureLayerGroup(map, state, 'markers');
+  const routesLayer = ensureLayerGroup(map, state, 'routes');
+
+  const entries = model.routes.flatMap((route) => route.entries.map((entry) => ({
+    ...entry,
+    color: route.color,
+    latLng: getLatLngFromPlace(entry.place)
+  })));
+
+  state.currentEntries = entries;
+  state.currentPlaces = entries.map((entry) => entry.place);
+
+  renderPlannerRoutes(map, model.routes, {
+    layerGroup: routesLayer,
+    scope: model.scope
+  });
+
+  renderPlannerMarkers(map, entries, {
+    layerGroup: markersLayer,
+    scope: model.scope,
+    categories: options.categories || categories,
+    priorityLabels: options.priorityLabels || priorityLabels,
+    citiesArray: options.citiesArray || [],
+    formatScore: options.formatScore,
+    mapLinkStyle: options.mapLinkStyle,
+    getGoogleMapsUrl,
+    onPlaceClick: options.onPlaceClick
+  });
+
+  fitMapToEntries(map, entries, { singleZoom: 14 });
+  invalidateTravelMapSize(map);
+}
+
+export function clearTravelMap(map) {
+  const state = getState(map);
+  clearAllTravelLayers(state);
+}
+
+export function destroyMap(map) {
+  if (!map) return;
+  const state = getState(map);
+  clearAllTravelLayers(state);
+  destroyTravelMap(map);
+}
+
+export function renderPlaceMap(containerId, place, options = {}) {
   const latLng = getPlaceLatLng(place);
   if (!latLng) return null;
-  
-  const map = L.map(containerId, {
+
+  const map = initLeafletMap(containerId, latLng, options.zoom || 16, {
+    controls: options.controls ?? false,
+    scrollWheelZoom: false,
+    dragging: options.dragging ?? false,
     zoomControl: false,
-    dragging: false,
-    scrollWheelZoom: false
-  }).setView([latLng.lat, latLng.lng], 16);
-
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; OpenStreetMap & CARTO',
-    subdomains: 'abcd',
-    maxZoom: 19
-  }).addTo(map);
-
-  const cat = categories.find(c => c.id === place.category);
-  const iconHtml = `<div class="custom-marker priority-${place.priority}">
-    <span class="marker-emoji">${cat?.icon || '📍'}</span>
-  </div>`;
-
-  const customIcon = L.divIcon({
-    className: 'custom-leaflet-icon',
-    html: iconHtml,
-    iconSize: [40, 40],
-    iconAnchor: [20, 40]
+    attributionControl: options.attributionControl ?? true,
+    showLocate: false,
+    showFitBounds: false,
+    showFullscreen: false,
+    className: 'travel-map-modal'
   });
 
-  L.marker([latLng.lat, latLng.lng], { icon: customIcon }).addTo(map);
-
+  if (!map) return null;
+  updateMapMarkers(map, [place], null, {
+    categories,
+    priorityLabels,
+    showTooltip: false,
+    fitBounds: false,
+    markerMode: 'modal'
+  });
+  setTimeout(() => invalidateTravelMapSize(map), 80);
   return map;
 }
 
@@ -116,7 +192,6 @@ export function getGoogleMapsUrl(place, mapLinkStyle = 'smart') {
   const nameEncoded = encodeURIComponent(place.name);
   const latLng = getPlaceLatLng(place);
 
-  // If we don't have coordinates, fallback to searching by name and city
   if (!latLng) {
     const query = encodeURIComponent(`${place.name}, ${place.cityId || 'Japan'}`);
     return `https://www.google.com/maps/search/?api=1&query=${query}`;
@@ -125,17 +200,39 @@ export function getGoogleMapsUrl(place, mapLinkStyle = 'smart') {
   const { lat, lng } = latLng;
 
   if (mapLinkStyle === 'coords') {
-    // Classic mode: just coordinates
     return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
   }
 
-  // Smart mode
   if (isMobile) {
-    // Native protocol for mobile devices (opens Google Maps / Apple Maps app)
     return `geo:${lat},${lng}?q=${lat},${lng}(${nameEncoded})`;
-  } else {
-    // Pro search for desktop (opens the Google Maps rich place card)
-    const query = encodeURIComponent(`${place.name}, ${place.cityId || 'Japan'}`);
-    return `https://www.google.com/maps/search/?api=1&query=${query}`;
   }
+
+  const query = encodeURIComponent(`${place.name}, ${place.cityId || 'Japan'}`);
+  return `https://www.google.com/maps/search/?api=1&query=${query}`;
+}
+
+export function getGoogleMapsRouteUrl(entries = [], options = {}) {
+  const valid = entries
+    .map((entry) => entry.latLng || getLatLngFromPlace(entry.place))
+    .filter(Boolean);
+
+  if (valid.length < 2) return '';
+
+  const maxWaypoints = options.maxWaypoints ?? 8;
+  const origin = valid[0];
+  const destination = valid[valid.length - 1];
+  const waypoints = valid.slice(1, -1).slice(0, maxWaypoints);
+  const travelMode = options.travelMode || 'walking';
+  const params = new URLSearchParams({
+    api: '1',
+    origin: `${origin.lat},${origin.lng}`,
+    destination: `${destination.lat},${destination.lng}`,
+    travelmode: travelMode
+  });
+
+  if (waypoints.length) {
+    params.set('waypoints', waypoints.map((point) => `${point.lat},${point.lng}`).join('|'));
+  }
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
