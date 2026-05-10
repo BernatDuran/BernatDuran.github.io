@@ -222,7 +222,7 @@ export function getGoogleMapsUrl(place, mapLinkStyle = 'smart') {
 
 export function getGoogleMapsRouteUrl(entries = [], options = {}) {
   const valid = entries
-    .map((entry) => entry.latLng || getLatLngFromPlace(entry.place))
+    .map((entry) => entry.latLng || getPlaceLatLng(entry.place))
     .filter(Boolean);
 
   if (valid.length < 2) return '';
