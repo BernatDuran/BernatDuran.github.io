@@ -2342,6 +2342,7 @@ function renderPlannerPage() {
   `;
 
   bindMobileNav('mobile-toggle', 'mobile-menu');
+  attachPlannerViewToggleEvents();
   attachPlannerFilterEvents();
   restoreInputFocusState(focusState);
   restoreTransientUiState();
@@ -2357,20 +2358,35 @@ function renderPlannerMap(model) {
   const mapContainer = document.getElementById('planner-map-container');
   if (!mapContainer || model.mappedCount === 0 || typeof L === 'undefined') return;
 
-  _plannerMap = initLeafletMap('planner-map-container', DEFAULT_MAP_CENTER, 5, {
-    controls: true,
-    showLocate: true,
-    showFullscreen: true,
-    showFitBounds: true
-  });
+  try {
+    _plannerMap = initLeafletMap('planner-map-container', DEFAULT_MAP_CENTER, 5, {
+      controls: true,
+      showLocate: true,
+      showFullscreen: true,
+      showFitBounds: true
+    });
 
-  renderPlannerTravelMap(_plannerMap, model, {
-    categories,
-    priorityLabels,
-    citiesArray: _citiesArray,
-    formatScore,
-    mapLinkStyle: _globalSettings?.mapLinkStyle,
-    onPlaceClick: openModal
+    renderPlannerTravelMap(_plannerMap, model, {
+      categories,
+      priorityLabels,
+      citiesArray: _citiesArray,
+      formatScore,
+      mapLinkStyle: _globalSettings?.mapLinkStyle,
+      onPlaceClick: openModal
+    });
+  } catch (error) {
+    console.error('No se pudo renderizar el mapa del planner.', error);
+    mapContainer.insertAdjacentHTML('afterend', '<div class="planner-map-distance-warning">No se pudo cargar el mapa. Recarga la pagina o vuelve a Calendario.</div>');
+  }
+}
+
+function attachPlannerViewToggleEvents() {
+  document.querySelectorAll('[data-view-mode]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPlannerViewMode(button.dataset.viewMode);
+    });
   });
 }
 
