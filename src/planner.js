@@ -639,10 +639,12 @@ function renderModal(place) {
 }
 
 function renderViewToggle() {
+  const calendarHref = '/planner.html?view=calendar';
+  const mapHref = '/planner.html?view=map';
   return `
     <div class="planner-view-toggle">
-      <button class="planner-view-btn ${_viewMode === 'calendar' ? 'active' : ''}" data-view-mode="calendar">Calendario</button>
-      <button class="planner-view-btn ${_viewMode === 'map' ? 'active' : ''}" data-view-mode="map">Mapa</button>
+      <a href="${calendarHref}" class="planner-view-btn ${_viewMode === 'calendar' ? 'active' : ''}" data-view-mode="calendar">Calendario</a>
+      <a href="${mapHref}" class="planner-view-btn ${_viewMode === 'map' ? 'active' : ''}" data-view-mode="map">Mapa</a>
     </div>
   `;
 }
@@ -2484,6 +2486,9 @@ function closePlaceModal() {
 function setPlannerViewMode(mode) {
   if (mode !== 'calendar' && mode !== 'map') return;
   _viewMode = mode;
+  const url = new URL(window.location.href);
+  url.searchParams.set('view', mode);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   renderPlannerPage();
 }
 
@@ -2685,6 +2690,13 @@ function handlePageChange(e) {
 }
 
 document.addEventListener('click', handlePageClick);
+document.addEventListener('click', (event) => {
+  const viewBtn = event.target.closest('[data-view-mode]');
+  if (!viewBtn) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setPlannerViewMode(viewBtn.dataset.viewMode);
+}, true);
 document.addEventListener('change', handlePageChange);
 
 if (!window.__plannerScoreDropdownOutsideBound) {
@@ -2714,6 +2726,10 @@ async function boot() {
 
   const groups = buildGroupedData();
   _selectedMapScope = getRecommendedMapScope(groups);
+  const initialViewMode = new URLSearchParams(window.location.search).get('view');
+  if (initialViewMode === 'map' || initialViewMode === 'calendar') {
+    _viewMode = initialViewMode;
+  }
 
   document.title = 'Planificador \u2014 Jap\u00F3n 2026';
   renderPlannerPage();
