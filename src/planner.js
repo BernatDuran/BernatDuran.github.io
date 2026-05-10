@@ -29,7 +29,7 @@ let _plannerItems = [];
 let _globalSettings = {};
 let _totalTripDays = 7;
 let _citiesArray = [];
-let _viewMode = 'calendar';
+let _viewMode = getPlannerViewModeFromUrl() || 'calendar';
 let _selectedMapScope = 'all';
 let _plannerFilterState = { search: '', cityId: '', priority: '', scoreBands: [] };
 
@@ -647,6 +647,15 @@ function renderViewToggle() {
       <a href="${mapHref}" class="planner-view-btn ${_viewMode === 'map' ? 'active' : ''}" data-view-mode="map">Mapa</a>
     </div>
   `;
+}
+
+function getPlannerViewModeFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const viewMode = new URLSearchParams(window.location.search).get('view');
+  if (viewMode === 'map' || viewMode === 'calendar') return viewMode;
+  if (window.location.href.includes('view=map')) return 'map';
+  if (window.location.href.includes('view=calendar')) return 'calendar';
+  return null;
 }
 
 function renderMapScopeBar(model) {
@@ -2244,6 +2253,7 @@ function buildNav(plannerLink) {
 }
 
 function renderPlannerPage() {
+  _viewMode = getPlannerViewModeFromUrl() || _viewMode;
   const focusState = captureInputFocusState();
   destroyPlannerMap();
 
@@ -2344,7 +2354,6 @@ function renderPlannerPage() {
   `;
 
   bindMobileNav('mobile-toggle', 'mobile-menu');
-  attachPlannerViewToggleEvents();
   attachPlannerFilterEvents();
   restoreInputFocusState(focusState);
   restoreTransientUiState();
@@ -2380,16 +2389,6 @@ function renderPlannerMap(model) {
     console.error('No se pudo renderizar el mapa del planner.', error);
     mapContainer.insertAdjacentHTML('afterend', '<div class="planner-map-distance-warning">No se pudo cargar el mapa. Recarga la pagina o vuelve a Calendario.</div>');
   }
-}
-
-function attachPlannerViewToggleEvents() {
-  document.querySelectorAll('[data-view-mode]').forEach((button) => {
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setPlannerViewMode(button.dataset.viewMode);
-    });
-  });
 }
 
 function attachPlannerFilterEvents() {
@@ -2495,6 +2494,9 @@ function setPlannerViewMode(mode) {
 function setMapScope(scope) {
   _selectedMapScope = normalizeMapScope(scope);
   if (_viewMode !== 'map') _viewMode = 'map';
+  const url = new URL(window.location.href);
+  url.searchParams.set('view', 'map');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   renderPlannerPage();
 }
 
@@ -2690,14 +2692,11 @@ function handlePageChange(e) {
 }
 
 document.addEventListener('click', handlePageClick);
-document.addEventListener('click', (event) => {
-  const viewBtn = event.target.closest('[data-view-mode]');
-  if (!viewBtn) return;
-  event.preventDefault();
-  event.stopPropagation();
-  setPlannerViewMode(viewBtn.dataset.viewMode);
-}, true);
 document.addEventListener('change', handlePageChange);
+window.addEventListener('popstate', () => {
+  _viewMode = getPlannerViewModeFromUrl() || 'calendar';
+  renderPlannerPage();
+});
 
 if (!window.__plannerScoreDropdownOutsideBound) {
   window.__plannerScoreDropdownOutsideBound = true;
@@ -2726,10 +2725,7 @@ async function boot() {
 
   const groups = buildGroupedData();
   _selectedMapScope = getRecommendedMapScope(groups);
-  const initialViewMode = new URLSearchParams(window.location.search).get('view');
-  if (initialViewMode === 'map' || initialViewMode === 'calendar') {
-    _viewMode = initialViewMode;
-  }
+  _viewMode = getPlannerViewModeFromUrl() || _viewMode;
 
   document.title = 'Planificador \u2014 Jap\u00F3n 2026';
   renderPlannerPage();
