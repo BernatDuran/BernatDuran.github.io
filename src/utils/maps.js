@@ -149,6 +149,7 @@ export function renderPlannerTravelMap(map, model, options = {}) {
     formatScore: options.formatScore,
     mapLinkStyle: options.mapLinkStyle,
     getGoogleMapsUrl,
+    openDetailsOnMarkerClick: true,
     onPlaceClick: options.onPlaceClick
   });
 

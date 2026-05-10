@@ -377,10 +377,15 @@ body.nav-mobile-open { overflow: hidden; }
 .planner-map-shell { position: relative; z-index: 0; isolation: isolate; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .planner-map-container { width: 100%; min-height: 520px; }
 .planner-map-container.is-hidden { display: none; }
-.planner-map-shell .leaflet-pane,
+.planner-map-shell .leaflet-tile-pane { z-index: 200; }
+.planner-map-shell .leaflet-overlay-pane { z-index: 350; }
+.planner-map-shell .leaflet-shadow-pane { z-index: 450; }
+.planner-map-shell .leaflet-marker-pane { z-index: 600; }
+.planner-map-shell .leaflet-tooltip-pane { z-index: 650; }
+.planner-map-shell .leaflet-popup-pane { z-index: 700; }
+.planner-map-shell .leaflet-control-container,
 .planner-map-shell .leaflet-top,
-.planner-map-shell .leaflet-bottom,
-.planner-map-shell .leaflet-control-container { z-index: auto; }
+.planner-map-shell .leaflet-bottom { z-index: 750; }
 .planner-map-empty { padding: var(--space-xl); color: var(--text-secondary); font-size: 0.9rem; text-align: center; }
 .planner-map-segments-card { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: var(--space-md); min-height: 0; }
 .planner-map-segments-card h4 { font-size: 0.95rem; margin-bottom: var(--space-sm); }

@@ -70,19 +70,31 @@ export function renderPlannerMarkers(map, entries = [], options = {}) {
       scope: options.scope
     });
 
-    const marker = L.marker([latLng.lat, latLng.lng], { icon });
+    const marker = L.marker([latLng.lat, latLng.lng], {
+      icon,
+      riseOnHover: true
+    });
     marker.placeId = entry.place.id;
-    marker.bindPopup(options.popupRenderer
-      ? options.popupRenderer(entry)
-      : createPlannerPopupContent(entry, { ...options, color: entry.color }));
-    bindTooltip(marker, createPlaceTooltipContent(entry.place, options));
-    marker.on('popupopen', (event) => {
-      bindPopupActions(event.popup.getElement(), {
-        onDetails: (placeId) => {
-          const selected = entries.find((candidate) => candidate.place.id === placeId) || entry;
-          options.onPlaceClick?.(selected.place);
-        }
+
+    if (options.openDetailsOnMarkerClick !== true) {
+      marker.bindPopup(options.popupRenderer
+        ? options.popupRenderer(entry)
+        : createPlannerPopupContent(entry, { ...options, color: entry.color }));
+      marker.on('popupopen', (event) => {
+        bindPopupActions(event.popup.getElement(), {
+          onDetails: (placeId) => {
+            const selected = entries.find((candidate) => candidate.place.id === placeId) || entry;
+            options.onPlaceClick?.(selected.place);
+          }
+        });
       });
+    }
+
+    bindTooltip(marker, createPlaceTooltipContent(entry.place, options));
+    marker.on('click', () => {
+      if (options.openDetailsOnMarkerClick === true) {
+        options.onPlaceClick?.(entry.place);
+      }
     });
     marker.addTo(layerGroup);
   });
