@@ -179,8 +179,12 @@
 }
 
 .travel-map-popup {
-  width: min(300px, calc(100vw - 48px));
+  width: min(360px, calc(100vw - 48px));
   color: var(--text-primary);
+}
+
+.leaflet-popup-content:has(.travel-map-popup) {
+  width: min(360px, calc(100vw - 48px)) !important;
 }
 
 .travel-map-popup-header {

@@ -9,7 +9,6 @@ import {
   ensureLayerGroup,
   fitMapToEntries,
   fitMapToPlaces,
-  getLatLngFromPlace,
   invalidateTravelMapSize,
   renderPlaceMarkers,
   renderPlannerMarkers,
@@ -117,16 +116,26 @@ export function renderPlannerTravelMap(map, model, options = {}) {
   const markersLayer = ensureLayerGroup(map, state, 'markers');
   const routesLayer = ensureLayerGroup(map, state, 'routes');
 
-  const entries = model.routes.flatMap((route) => route.entries.map((entry) => ({
-    ...entry,
-    color: route.color,
-    latLng: getLatLngFromPlace(entry.place)
-  })));
+  const routes = model.routes.map((route) => ({
+    ...route,
+    allEntries: (route.allEntries || []).map((entry) => ({
+      ...entry,
+      color: route.color,
+      latLng: getPlaceLatLng(entry.place)
+    })),
+    entries: (route.entries || []).map((entry) => ({
+      ...entry,
+      color: route.color,
+      latLng: getPlaceLatLng(entry.place)
+    }))
+  }));
+
+  const entries = routes.flatMap((route) => route.entries);
 
   state.currentEntries = entries;
   state.currentPlaces = entries.map((entry) => entry.place);
 
-  renderPlannerRoutes(map, model.routes, {
+  renderPlannerRoutes(map, routes, {
     layerGroup: routesLayer,
     scope: model.scope
   });
