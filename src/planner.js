@@ -2374,7 +2374,7 @@ function renderPlannerMap(model) {
       citiesArray: _citiesArray,
       formatScore,
       mapLinkStyle: _globalSettings?.mapLinkStyle,
-      onPlaceClick: openModal
+      onPlaceClick: openPlaceModal
     });
   } catch (error) {
     console.error('No se pudo renderizar el mapa del planner.', error);
