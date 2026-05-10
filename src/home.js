@@ -1,4 +1,4 @@
-import { registerSW } from 'virtual:pwa-register';
+import { setupPwa } from './utils/pwa.js';
 import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
@@ -179,9 +179,7 @@ function render(citiesArray, allPlaces, globalSettings) {
   updateCountdown();
   setInterval(updateCountdown, 1000);
 
-  if ('serviceWorker' in navigator) {
-    registerSW({ immediate: true });
-  }
+  setupPwa();
 }
 
 function renderCityCard(city, allPlaces) {

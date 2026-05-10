@@ -1,4 +1,4 @@
-﻿import './styles/main.css';
+import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import './styles/maps.css';
@@ -6,7 +6,7 @@ import { getAll, putAll } from './utils/db.js';
 import { categories, priorityLabels } from './data/cities.js';
 import { icons, formatScore, debounce, parseEstimatedDurationToMinutes, formatDurationMinutes } from './utils/helpers.js';
 import { initLeafletMap, renderPlaceMap, getGoogleMapsRouteUrl, getGoogleMapsUrl, renderPlannerTravelMap } from './utils/maps.js';
-import { registerSW } from 'virtual:pwa-register';
+import { setupPwa } from './utils/pwa.js';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { sortCities } from './utils/cityData.js';
@@ -14,9 +14,7 @@ import { formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js'
 import { runDataMigration } from './utils/dataMigration.js';
 import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 
-if ('serviceWorker' in navigator) {
-  registerSW({ immediate: true });
-}
+setupPwa();
 
 const app = document.getElementById('app');
 const DEFAULT_MAP_CENTER = { lat: 36.2048, lng: 138.2529 };

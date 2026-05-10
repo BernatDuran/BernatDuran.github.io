@@ -1,4 +1,4 @@
-﻿import './styles/main.css';
+import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import './styles/maps.css';
@@ -6,7 +6,7 @@ import { categories, priorityLabels } from './data/cities.js';
 import { filterPlaces, getZones } from './utils/filters.js';
 import { icons, formatScore, debounce, getTimeIcon } from './utils/helpers.js';
 import { initLeafletMap, updateMapMarkers, renderPlaceMap, getGoogleMapsUrl } from './utils/maps.js';
-import { registerSW } from 'virtual:pwa-register';
+import { setupPwa } from './utils/pwa.js';
 import { getById, getAll, putAll } from './utils/db.js';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { formatRecommendedDays, sortCities } from './utils/cityData.js';
@@ -14,9 +14,7 @@ import { BEST_TIME_OPTIONS, formatBestTimeLabel, getPlaceLatLng, normalizePlaceR
 import { runDataMigration } from './utils/dataMigration.js';
 import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 // Register PWA Service Worker
-if ('serviceWorker' in navigator) {
-  registerSW({ immediate: true });
-}
+setupPwa();
 
 export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems, globalSettings, pendingEditPlaceId = '') {
   const app = document.getElementById('app');
