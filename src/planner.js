@@ -2482,15 +2482,6 @@ function closePlaceModal() {
   document.body.style.overflow = '';
 }
 
-function setPlannerViewMode(mode) {
-  if (mode !== 'calendar' && mode !== 'map') return;
-  _viewMode = mode;
-  const url = new URL(window.location.href);
-  url.searchParams.set('view', mode);
-  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-  renderPlannerPage();
-}
-
 function setMapScope(scope) {
   _selectedMapScope = normalizeMapScope(scope);
   if (_viewMode !== 'map') _viewMode = 'map';
@@ -2621,8 +2612,6 @@ async function setPlannerState(placeId, newStatus, assignedDay) {
 function handlePageClick(e) {
   const viewBtn = e.target.closest('[data-view-mode]');
   if (viewBtn) {
-    e.preventDefault();
-    setPlannerViewMode(viewBtn.dataset.viewMode);
     return;
   }
 
