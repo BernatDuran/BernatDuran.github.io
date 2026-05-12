@@ -192,8 +192,13 @@ Configuración necesaria en Cloudflare Pages:
 - `DEFAULT_ROUTE_MODE`: `walking`.
 - `DEFAULT_LANGUAGE`: `es`.
 - `DEFAULT_UNITS`: `METRIC`.
+- `ACCESS_TEAM_DOMAIN`: dominio de Cloudflare Access, por ejemplo `https://<team>.cloudflareaccess.com`.
+- `ACCESS_AUD`: Application Audience (AUD) Tag de la app en Cloudflare Access.
+- `ALLOWED_EMAILS`: emails permitidos separados por coma.
 
 El frontend llama por defecto al endpoint same-origin `/api/route`. Para pruebas avanzadas se puede sobrescribir con `VITE_ROUTES_PROXY_URL`, pero producción debería usar `/api`.
+
+Si se configura cualquiera de las variables de Access, `/api/route` exige la configuración completa y valida el JWT `Cf-Access-Jwt-Assertion` antes de llamar a Google Routes.
 
 ## CI/CD y despliegue
 

@@ -2,6 +2,18 @@ const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoute
 const FIELD_MASK = 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline';
 const WALKING_MODE = 'walking';
 
+function base64UrlToBytes(value) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function decodeJwtPart(value) {
+  const text = new TextDecoder().decode(base64UrlToBytes(value));
+  return JSON.parse(text);
+}
+
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -9,6 +21,124 @@ function jsonResponse(payload, status = 200) {
       'content-type': 'application/json; charset=UTF-8'
     }
   });
+}
+
+function normalizeTeamDomain(teamDomain) {
+  return String(teamDomain || '').replace(/\/+$/, '');
+}
+
+function parseAllowedEmails(value) {
+  return String(value || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function shouldValidateAccess(env) {
+  return Boolean(env.ACCESS_TEAM_DOMAIN || env.ACCESS_AUD || env.ALLOWED_EMAILS);
+}
+
+function getAccessConfig(env) {
+  if (!shouldValidateAccess(env)) {
+    return { enabled: false };
+  }
+
+  const teamDomain = normalizeTeamDomain(env.ACCESS_TEAM_DOMAIN);
+  const audience = String(env.ACCESS_AUD || '').trim();
+  const allowedEmails = parseAllowedEmails(env.ALLOWED_EMAILS);
+
+  if (!teamDomain || !audience || allowedEmails.length === 0) {
+    return { error: 'Configuracion de Cloudflare Access incompleta.' };
+  }
+
+  return {
+    enabled: true,
+    teamDomain,
+    audience,
+    allowedEmails
+  };
+}
+
+function hasAudience(payloadAudience, expectedAudience) {
+  if (Array.isArray(payloadAudience)) return payloadAudience.includes(expectedAudience);
+  return payloadAudience === expectedAudience;
+}
+
+function isJwtTimeValid(payload, nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (Number.isFinite(payload.exp) && nowSeconds >= payload.exp) return false;
+  if (Number.isFinite(payload.nbf) && nowSeconds < payload.nbf) return false;
+  return true;
+}
+
+async function verifyAccessJwtSignature(token, config) {
+  const [encodedHeader, encodedPayload, encodedSignature] = token.split('.');
+  if (!encodedHeader || !encodedPayload || !encodedSignature) {
+    return { error: 'JWT de Cloudflare Access mal formado.' };
+  }
+
+  const header = decodeJwtPart(encodedHeader);
+  const payload = decodeJwtPart(encodedPayload);
+  if (header.alg !== 'RS256' || !header.kid) {
+    return { error: 'JWT de Cloudflare Access con algoritmo no admitido.' };
+  }
+
+  const certsResponse = await fetch(`${config.teamDomain}/cdn-cgi/access/certs`);
+  if (!certsResponse.ok) {
+    return { error: 'No se han podido obtener las claves publicas de Cloudflare Access.' };
+  }
+
+  const certs = await certsResponse.json();
+  const key = certs.keys?.find((candidate) => candidate.kid === header.kid);
+  if (!key) {
+    return { error: 'No se ha encontrado la clave publica del JWT de Cloudflare Access.' };
+  }
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'jwk',
+    key,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['verify']
+  );
+
+  const data = new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`);
+  const signature = base64UrlToBytes(encodedSignature);
+  const isValid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, signature, data);
+  if (!isValid) {
+    return { error: 'Firma del JWT de Cloudflare Access no valida.' };
+  }
+
+  return { payload };
+}
+
+async function validateAccessRequest(request, env) {
+  const config = getAccessConfig(env);
+  if (!config.enabled && !config.error) return null;
+  if (config.error) return jsonResponse({ error: config.error }, 500);
+
+  const token = request.headers.get('cf-access-jwt-assertion');
+  if (!token) {
+    return jsonResponse({ error: 'Falta el JWT de Cloudflare Access.' }, 401);
+  }
+
+  try {
+    const verified = await verifyAccessJwtSignature(token, config);
+    if (verified.error) return jsonResponse({ error: verified.error }, 403);
+
+    const payload = verified.payload;
+    const email = String(payload.email || '').toLowerCase();
+    if (payload.iss !== config.teamDomain || !hasAudience(payload.aud, config.audience) || !isJwtTimeValid(payload)) {
+      return jsonResponse({ error: 'JWT de Cloudflare Access no autorizado.' }, 403);
+    }
+
+    if (!email || !config.allowedEmails.includes(email)) {
+      return jsonResponse({ error: 'Email no autorizado para calcular rutas.' }, 403);
+    }
+  } catch {
+    return jsonResponse({ error: 'No se ha podido validar Cloudflare Access.' }, 403);
+  }
+
+  return null;
 }
 
 function parseCoordinate(value, label) {
@@ -100,6 +230,9 @@ function buildGoogleRequestBody(params, env) {
 }
 
 async function handleRouteRequest(request, env) {
+  const accessError = await validateAccessRequest(request, env);
+  if (accessError) return accessError;
+
   if (!env.GOOGLE_ROUTES_API_KEY) {
     return jsonResponse({ error: 'Cloudflare Pages no tiene configurada la API key de Google Routes.' }, 500);
   }
