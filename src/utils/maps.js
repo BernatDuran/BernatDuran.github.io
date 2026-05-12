@@ -127,6 +127,19 @@ export function renderPlannerTravelMap(map, model, options = {}) {
       ...entry,
       color: route.color,
       latLng: getPlaceLatLng(entry.place)
+    })),
+    walkingSegments: (route.walkingSegments || []).map((segment) => ({
+      ...segment,
+      originEntry: {
+        ...segment.originEntry,
+        color: route.color,
+        latLng: getPlaceLatLng(segment.originEntry?.place)
+      },
+      destinationEntry: {
+        ...segment.destinationEntry,
+        color: route.color,
+        latLng: getPlaceLatLng(segment.destinationEntry?.place)
+      }
     }))
   }));
 

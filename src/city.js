@@ -5,7 +5,7 @@ import './styles/maps.css';
 import { categories, priorityLabels } from './data/cities.js';
 import { filterPlaces, getZones } from './utils/filters.js';
 import { icons, formatScore, debounce, getTimeIcon } from './utils/helpers.js';
-import { initLeafletMap, updateMapMarkers, renderPlaceMap, getGoogleMapsUrl } from './utils/maps.js';
+import { initLeafletMap, updateMapMarkers, renderPlaceMap, getGoogleMapsUrl, destroyMap } from './utils/maps.js';
 import { setupPwa } from './utils/pwa.js';
 import { getById, getAll, putAll } from './utils/db.js';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
@@ -85,8 +85,8 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   
   let plannerItems = initialPlannerItems || [];
   let mapInstance = null;
-  let savedMapElement = null;
   let scoreDropdownOpen = false;
+  let citySectionFocus = 'activities';
 
   function captureInputFocusState() {
     const activeElement = document.activeElement;
@@ -124,6 +124,113 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     });
   }
 
+  function getSafeScrollTop(requestedTop) {
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    return Math.min(Math.max(0, requestedTop), maxScroll);
+  }
+
+  function scrollToInstant(top) {
+    const root = document.documentElement;
+    const previousScrollBehavior = root.style.scrollBehavior;
+    root.style.scrollBehavior = 'auto';
+    window.scrollTo(0, getSafeScrollTop(top));
+    root.style.scrollBehavior = previousScrollBehavior;
+  }
+
+  function getViewportAnchor() {
+    const activitiesSection = document.getElementById('city-activities-section');
+    const mapContainer = document.getElementById('city-map-container');
+    const mapSection = document.getElementById('city-map-section');
+    const currentScrollTop = window.scrollY;
+
+    if (citySectionFocus === 'map') {
+      const filtersBottom = document.getElementById('filters-section')?.getBoundingClientRect().bottom ?? 0;
+      const mapContainerTop = mapContainer?.getBoundingClientRect().top ?? Number.NEGATIVE_INFINITY;
+      const mapAnchor = mapContainerTop > filtersBottom + 1
+        ? mapSection || mapContainer
+        : mapContainer || mapSection;
+      if (mapAnchor) {
+        const mapAnchorRect = mapAnchor.getBoundingClientRect();
+        return {
+          mode: 'element',
+          id: mapAnchor.id,
+          edge: 'bottom',
+          bottom: mapAnchorRect.bottom
+        };
+      }
+    }
+
+    if (activitiesSection) {
+      const activitiesRect = activitiesSection.getBoundingClientRect();
+      return {
+        mode: 'element',
+        id: 'city-activities-section',
+        edge: 'top',
+        top: activitiesRect.top
+      };
+    }
+
+    return {
+      mode: 'page',
+      offset: currentScrollTop
+    };
+  }
+
+  function restoreViewportAnchor(anchor) {
+    if (!anchor) return;
+
+    if (anchor.mode === 'element' && anchor.id) {
+      const section = document.getElementById(anchor.id);
+      if (!section) return;
+      const rect = section.getBoundingClientRect();
+      const delta = anchor.edge === 'bottom'
+        ? rect.bottom - (anchor.bottom || 0)
+        : rect.top - (anchor.top || 0);
+      if (delta !== 0) {
+        scrollToInstant(window.scrollY + delta);
+      }
+      return;
+    }
+
+    if (anchor.mode === 'page') {
+      scrollToInstant(anchor.offset || 0);
+    }
+  }
+
+  function renderSectionToggle() {
+    return `
+      <div class="city-section-toggle" aria-label="Navegacion de secciones">
+        <button type="button" class="city-section-toggle-btn ${citySectionFocus === 'activities' ? 'active' : ''}" data-city-section-target="activities">&#x1F5C2;&#xFE0F; Actividades</button>
+        <button type="button" class="city-section-toggle-btn city-section-toggle-btn-map ${citySectionFocus === 'map' ? 'active' : ''}" data-city-section-target="map">&#x1F5FA;&#xFE0F; Mapa</button>
+      </div>
+    `;
+  }
+
+  function applyCitySectionVisibility(options = {}) {
+    const activitiesSection = document.getElementById('city-activities-section');
+    const mapSection = document.getElementById('city-map-section');
+    const showMap = citySectionFocus === 'map';
+
+    if (activitiesSection) activitiesSection.hidden = showMap;
+    if (mapSection) mapSection.hidden = !showMap;
+
+    document.querySelectorAll('[data-city-section-target]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.citySectionTarget === citySectionFocus);
+    });
+
+    if (showMap) {
+      requestAnimationFrame(() => {
+        mapInstance?.invalidateSize?.({ pan: false });
+        updateMapForFilteredPlaces(getFilteredPlaces(), { fitBounds: options.fitMap === true });
+      });
+    }
+  }
+
+  function switchCitySection(section) {
+    citySectionFocus = section;
+    applyCitySectionVisibility({ fitMap: section === 'map' });
+  }
+
   function getPlannerItem(placeId) {
     return plannerItems.find(p => p.placeId === placeId) || {};
   }
@@ -151,17 +258,126 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     return filtered;
   }
 
-  function render() {
-    const focusState = captureInputFocusState();
-    const oldMapContainer = document.getElementById('city-map-container');
-    if (oldMapContainer && mapInstance) {
-      savedMapElement = oldMapContainer;
-    }
+  function renderPlacesContent(filtered) {
+    return filtered.length > 0
+      ? `<div class="places-grid" id="places-grid">${filtered.map(p => renderPlaceCard(p)).join('')}</div>`
+      : `<div class="empty-state"><div class="empty-state-icon">&#x1F50D;</div><h3>No se encontraron lugares</h3><p>Prueba a cambiar los filtros o el texto de b&uacute;squeda</p></div>`;
+  }
 
+  function renderResultsCount(filtered) {
+    return `${filtered.length} de ${places.length} lugares`;
+  }
+
+  function renderFiltersSection(filtered, zones) {
+    return `
+      <div class="filters-inner">
+        <div class="filters-row filters-row-search">
+          <div class="search-bar-container" style="flex:1;max-width:400px;">
+            <span class="search-bar-icon">${icons.search}</span>
+            <input type="text" class="search-bar" id="search-input" placeholder="Buscar lugar, zona o tipo..." value="${state.search}">
+            <button class="search-clear ${state.search ? 'visible' : ''}" id="search-clear">&#x2715;</button>
+          </div>
+          <div class="filters-inline-actions">
+            ${renderPriorityFilters(false)}
+            <span class="nav-separator filter-soft-separator" aria-hidden="true">|</span>
+            <button class="filter-pill ${state.rainyFriendly ? 'active' : ''}" id="rainy-filter">&#x2614; Solo lluvia</button>
+          </div>
+          ${renderSectionToggle()}
+          <span class="results-count" id="results-count">${renderResultsCount(filtered)}</span>
+        </div>
+        <div class="filters-row filters-row-controls">
+          ${renderCategoryFilters()}
+          ${renderSingleSelectFilter({
+            id: 'zone',
+            value: state.zone,
+            fallbackLabel: 'Todas las zonas',
+            options: [
+              { value: '', label: 'Todas las zonas' },
+              ...zones.map((zone) => ({ value: zone, label: zone }))
+            ]
+          })}
+          ${renderSingleSelectFilter({
+            id: 'timeOfDay',
+            value: state.timeOfDay,
+            fallbackLabel: '&#x1F551; Cualquier momento',
+            options: [
+              { value: '', label: '&#x1F551; Cualquier momento' },
+              { value: 'maÃ±ana', label: '&#x2600;&#xFE0F; Ma&ntilde;ana' },
+              { value: 'tarde', label: '&#x1F307; Tarde' },
+              { value: 'noche', label: '&#x1F319; Noche' }
+            ]
+          })}
+          ${renderScoreFilters()}
+          ${renderSingleSelectFilter({
+            id: 'plannerFilter',
+            value: state.plannerFilter,
+            fallbackLabel: 'Todos los estados',
+            options: [
+              { value: '', label: 'Todos los estados' },
+              { value: 'none', label: 'Sin asignar' },
+              { value: 'in-tray', label: 'En bandeja' },
+              { value: 'planned', label: 'Planeado' },
+              { value: 'done', label: 'Realizado' },
+              { value: 'discarded', label: 'Descartado' }
+            ]
+          })}
+          ${renderSingleSelectFilter({
+            id: 'plannerDay',
+            className: 'day-filter-dropdown',
+            value: state.plannerDay,
+            fallbackLabel: 'Todos los d&iacute;as',
+            options: [
+              { value: '', label: 'Todos los d&iacute;as' },
+              ...Array.from({ length: totalTripDays }, (_, i) => ({ value: String(i + 1), label: `D&iacute;a ${i + 1}` }))
+            ]
+          })}
+          ${hasActiveFilters() ? `<button class="clear-filters" id="clear-filters">Limpiar filtros</button>` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function updateMapForFilteredPlaces(filtered, options = {}) {
+    if (!mapInstance) return;
+    updateMapMarkers(mapInstance, filtered, openModal, {
+      plannerItems,
+      mapLinkStyle: globalSettings?.mapLinkStyle,
+      formatScore,
+      fitBounds: options.fitBounds === true
+    });
+  }
+
+  function refreshFilteredView(options = {}) {
+    const preserveViewport = options.preserveViewport === true;
+    const focusState = captureInputFocusState();
+    const viewportAnchor = preserveViewport ? getViewportAnchor() : null;
+    const filtered = getFilteredPlaces();
+    const zones = getZones(places);
+
+    document.getElementById('filters-section').innerHTML = renderFiltersSection(filtered, zones);
+    document.getElementById('city-activities-content').innerHTML = renderPlacesContent(filtered);
+
+    bindFilterEvents();
+    bindPlaceCardEvents();
+    applyCitySectionVisibility();
+    restoreInputFocusState(focusState);
+    restoreTransientUiState();
+    updateMapForFilteredPlaces(filtered, { fitBounds: false });
+
+    if (viewportAnchor) {
+      restoreViewportAnchor(viewportAnchor);
+    }
+  }
+
+  function render(options = {}) {
     const filtered = getFilteredPlaces();
     const zones = getZones(places);
     const mustSeeCount = places.filter(p => p.priority === 'must-see').length;
-    const trayCount = plannerItems.filter(p => p.status === 'in-tray' && places.some(pl => pl.id === p.placeId)).length;
+
+    if (mapInstance) {
+      destroyMap(mapInstance);
+      mapInstance = null;
+    }
 
     app.innerHTML = `
       ${renderNav(cityMeta, citiesArray)}
@@ -182,78 +398,15 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
         </div>
       </section>
       <div class="filters-section" id="filters-section">
-        <div class="filters-inner">
-          <div class="filters-row filters-row-search">
-            <div class="search-bar-container" style="flex:1;max-width:400px;">
-              <span class="search-bar-icon">${icons.search}</span>
-              <input type="text" class="search-bar" id="search-input" placeholder="Buscar lugar, zona o tipo..." value="${state.search}">
-              <button class="search-clear ${state.search ? 'visible' : ''}" id="search-clear">&#x2715;</button>
-            </div>
-            <div class="filters-inline-actions">
-              ${renderPriorityFilters(false)}
-              <span class="nav-separator filter-soft-separator" aria-hidden="true">|</span>
-              <button class="filter-pill ${state.rainyFriendly ? 'active' : ''}" id="rainy-filter">&#x2614; Solo lluvia</button>
-            </div>
-            <span class="results-count" id="results-count">${filtered.length} de ${places.length} lugares</span>
-          </div>
-          <div class="filters-row filters-row-controls">
-            ${renderCategoryFilters()}
-            ${renderSingleSelectFilter({
-              id: 'zone',
-              value: state.zone,
-              fallbackLabel: 'Todas las zonas',
-              options: [
-                { value: '', label: 'Todas las zonas' },
-                ...zones.map((zone) => ({ value: zone, label: zone }))
-              ]
-            })}
-            ${renderSingleSelectFilter({
-              id: 'timeOfDay',
-              value: state.timeOfDay,
-              fallbackLabel: '&#x1F551; Cualquier momento',
-              options: [
-                { value: '', label: '&#x1F551; Cualquier momento' },
-                { value: 'mañana', label: '&#x2600;&#xFE0F; Ma&ntilde;ana' },
-                { value: 'tarde', label: '&#x1F307; Tarde' },
-                { value: 'noche', label: '&#x1F319; Noche' }
-              ]
-            })}
-            ${renderScoreFilters()}
-            ${renderSingleSelectFilter({
-              id: 'plannerFilter',
-              value: state.plannerFilter,
-              fallbackLabel: 'Todos los estados',
-              options: [
-                { value: '', label: 'Todos los estados' },
-                { value: 'none', label: 'Sin asignar' },
-                { value: 'in-tray', label: 'En bandeja' },
-                { value: 'planned', label: 'Planeado' },
-                { value: 'done', label: 'Realizado' },
-                { value: 'discarded', label: 'Descartado' }
-              ]
-            })}
-            ${renderSingleSelectFilter({
-              id: 'plannerDay',
-              className: 'day-filter-dropdown',
-              value: state.plannerDay,
-              fallbackLabel: 'Todos los d&iacute;as',
-              options: [
-                { value: '', label: 'Todos los d&iacute;as' },
-                ...Array.from({ length: totalTripDays }, (_, i) => ({ value: String(i + 1), label: `D&iacute;a ${i + 1}` }))
-              ]
-            })}
-            ${hasActiveFilters() ? `<button class="clear-filters" id="clear-filters">Limpiar filtros</button>` : ''}
-          </div>
-        </div>
+        ${renderFiltersSection(filtered, zones)}
       </div>
-      <section class="section-sm">
-        <div class="container">
-          ${filtered.length > 0 ? `<div class="places-grid" id="places-grid">${filtered.map(p => renderPlaceCard(p)).join('')}</div>` :
-            `<div class="empty-state"><div class="empty-state-icon">&#x1F50D;</div><h3>No se encontraron lugares</h3><p>Prueba a cambiar los filtros o el texto de b&uacute;squeda</p></div>`}
+      <section class="section-sm" id="city-activities-section" ${citySectionFocus === 'map' ? 'hidden' : ''}>
+        <div class="container" id="city-activities-content">
+          ${renderPlacesContent(filtered)}
         </div>
       </section>
       
-      <section class="city-map-section section-sm">
+      <section class="city-map-section section-sm" id="city-map-section" ${citySectionFocus === 'map' ? '' : 'hidden'}>
         <div class="container">
           <div class="home-section-title"><h2>&#x1F5FA;&#xFE0F; Mapa Interactivo</h2><p>Explora la ciudad y encuentra lugares cercanos</p></div>
           <div id="map-placeholder-div"><div id="city-map-container" class="city-map-container"></div></div>
@@ -266,39 +419,21 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
       <button class="back-to-top" id="back-to-top">${icons.chevronUp}</button>
     `;
     attachEvents();
-    restoreInputFocusState(focusState);
-    restoreTransientUiState();
-    
-    // Restore or Initialize map
-    if (savedMapElement) {
-      const placeholder = document.getElementById('map-placeholder-div');
-      if (placeholder) {
-        placeholder.replaceWith(savedMapElement);
-      }
-      updateMapMarkers(mapInstance, filtered, openModal, {
-        plannerItems,
-        mapLinkStyle: globalSettings?.mapLinkStyle,
-        formatScore,
-        fitBounds: true
-      });
+    applyCitySectionVisibility();
+
+    const mapContainer = document.getElementById('city-map-container');
+    if (mapContainer && !mapInstance) {
+      setTimeout(() => {
+        mapInstance = initLeafletMap('city-map-container', cityMeta.center, cityMeta.defaultZoom, {
+          controls: true,
+          showLocate: true,
+          showFullscreen: true,
+          showFitBounds: true
+        });
+        updateMapForFilteredPlaces(filtered, { fitBounds: true });
+      }, 100);
     } else {
-      const mapContainer = document.getElementById('city-map-container');
-      if (mapContainer && !mapInstance) {
-        setTimeout(() => {
-          mapInstance = initLeafletMap('city-map-container', cityMeta.center, cityMeta.defaultZoom, {
-            controls: true,
-            showLocate: true,
-            showFullscreen: true,
-            showFitBounds: true
-          });
-          updateMapMarkers(mapInstance, filtered, openModal, {
-            plannerItems,
-            mapLinkStyle: globalSettings?.mapLinkStyle,
-            formatScore,
-            fitBounds: true
-          });
-        }, 100);
-      }
+      updateMapForFilteredPlaces(filtered, { fitBounds: options.refitMap === true });
     }
   }
 
@@ -749,37 +884,39 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     return state.search || state.category || state.priority || state.zone || state.timeOfDay || state.scoreBands.length || state.plannerFilter || state.plannerDay || state.rainyFriendly;
   }
 
-  function attachEvents() {
-    // Search
+  function bindFilterEvents() {
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
-      searchInput.addEventListener('input', debounce(e => { state.search = e.target.value; render(); }, 200));
+      searchInput.addEventListener('input', debounce((e) => {
+        state.search = e.target.value;
+        refreshFilteredView({ preserveViewport: true });
+      }, 200));
     }
-    document.getElementById('btn-create-place')?.addEventListener('click', () => openPlaceForm());
+
     document.getElementById('search-clear')?.addEventListener('click', () => {
       state.search = '';
-      render();
+      refreshFilteredView({ preserveViewport: true });
       requestAnimationFrame(() => {
         document.getElementById('search-input')?.focus({ preventScroll: true });
       });
     });
 
-    // Priority filters
-    document.querySelectorAll('[data-priority]').forEach(btn => {
-      btn.addEventListener('click', () => { state.priority = state.priority === btn.dataset.priority ? '' : btn.dataset.priority; render(); });
+    document.querySelectorAll('[data-priority]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.priority = state.priority === btn.dataset.priority ? '' : btn.dataset.priority;
+        refreshFilteredView({ preserveViewport: true });
+      });
     });
 
-    // Single-select dropdown filters
     document.querySelectorAll('[data-filter-target]').forEach((button) => {
       button.addEventListener('click', () => {
         const key = button.dataset.filterTarget;
         if (!Object.prototype.hasOwnProperty.call(state, key)) return;
         state[key] = button.dataset.value || '';
-        render();
+        refreshFilteredView({ preserveViewport: true });
       });
     });
 
-    // Score filters
     document.querySelectorAll('input[data-score-band]').forEach((input) => {
       input.addEventListener('change', () => {
         const value = input.dataset.scoreBand;
@@ -791,7 +928,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
         } else {
           state.scoreBands = state.scoreBands.filter((band) => band !== value);
         }
-        render();
+        refreshFilteredView({ preserveViewport: true });
       });
     });
 
@@ -811,39 +948,58 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
 
     document.getElementById('rainy-filter')?.addEventListener('click', () => {
       state.rainyFriendly = !state.rainyFriendly;
-      render();
+      refreshFilteredView({ preserveViewport: true });
     });
 
-    // Clear filters
     document.getElementById('clear-filters')?.addEventListener('click', () => {
       state = { search: '', category: '', priority: '', zone: '', timeOfDay: '', scoreBands: [], plannerFilter: '', plannerDay: '', rainyFriendly: false };
       scoreDropdownOpen = false;
-      render();
+      refreshFilteredView({ preserveViewport: true });
     });
 
-    // Place card click -> modal
-    document.querySelectorAll('.place-card').forEach(card => {
+    document.querySelectorAll('[data-city-section-target]').forEach((button) => {
+      button.addEventListener('click', () => {
+        switchCitySection(button.dataset.citySectionTarget || 'activities');
+      });
+    });
+  }
+
+  function bindPlaceCardEvents() {
+    document.querySelectorAll('.place-card').forEach((card) => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.planner-chip-container')) return; // Ignore clicks on the planner chip
-        const place = places.find(p => p.id === card.dataset.placeId);
+        if (e.target.closest('.planner-chip-container')) return;
+        const place = places.find((p) => p.id === card.dataset.placeId);
         if (place) openModal(place);
       });
     });
+  }
 
-    // Modal close
+  function attachGlobalWindowEvents() {
+    if (window.__cityPageGlobalEventsAttached) return;
+    window.__cityPageGlobalEventsAttached = true;
+
+    window.addEventListener('scroll', () => {
+      document.getElementById('back-to-top')?.classList.toggle('visible', window.scrollY > 500);
+      document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
+    });
+  }
+
+  function attachEvents() {
+    bindFilterEvents();
+    bindPlaceCardEvents();
+    document.getElementById('btn-create-place')?.addEventListener('click', () => openPlaceForm());
     document.getElementById('modal-overlay')?.addEventListener('click', e => { if (e.target.id === 'modal-overlay') closeModal(); });
 
     bindMobileNav('mobile-toggle', 'mobile-menu');
 
-    // Back to top
     const backToTop = document.getElementById('back-to-top');
     if (backToTop) {
-      window.addEventListener('scroll', () => { backToTop.classList.toggle('visible', window.scrollY > 500); });
       backToTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
     }
 
-    // Nav scroll effect
-    window.addEventListener('scroll', () => { document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10); });
+    attachGlobalWindowEvents();
+    document.getElementById('back-to-top')?.classList.toggle('visible', window.scrollY > 500);
+    document.getElementById('main-nav')?.classList.toggle('scrolled', window.scrollY > 10);
   }
 
   async function updatePlaceProp(placeId, prop, valueFn) {

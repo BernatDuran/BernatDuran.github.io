@@ -13,6 +13,10 @@ import { sortCities } from './utils/cityData.js';
 import { formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
+import { buildWalkingRouteCacheKey, getCachedWalkingRoute } from './utils/routes/routeCache.js';
+import { formatRouteDistance, formatRouteDuration } from './utils/routes/routeFormatters.js';
+import { hasUsablePolyline } from './utils/routes/routePolyline.js';
+import { getWalkingRoutesForEntries } from './utils/routes/routeService.js';
 
 setupPwa();
 
@@ -23,6 +27,8 @@ const EXPORT_SATURATION_ACTIVITY_LIMIT = 7;
 const EXPORT_SATURATION_MINUTES_LIMIT = 480;
 const EXPORT_MAP_CAPTURE_SCALE = 2;
 const EXPORT_MAP_TILE_TIMEOUT_MS = 4500;
+const ROUTE_VALIDATION_STORAGE_KEY = 'planner:validated-route-days:v1';
+const PLANNER_COLLAPSED_DAYS_STORAGE_KEY = 'planner:collapsed-days:v1';
 
 let _places = [];
 let _plannerItems = [];
@@ -41,6 +47,15 @@ let _toastPortal = null;
 let _toastHideTimer = null;
 let _toastRemoveTimer = null;
 let _plannerScoreDropdownOpen = false;
+let _walkingRoutesLoading = false;
+let _walkingRouteMessage = '';
+let _walkingRouteMessageTone = 'idle';
+let _walkingRouteResults = new Map();
+let _walkingRouteStaleDays = new Set();
+let _validatedRouteDays = loadValidatedRouteDays();
+let _collapsedPlannerDays = loadCollapsedPlannerDays();
+let _plannerDayMapModalDay = null;
+let _plannerDayMap = null;
 const _pdfEmojiCache = new Map();
 
 function captureInputFocusState() {
@@ -77,6 +92,84 @@ function restoreTransientUiState() {
     if (!_plannerScoreDropdownOpen) return;
     document.querySelector('.score-filter-group')?.setAttribute('open', '');
   });
+}
+
+function loadValidatedRouteDays() {
+  try {
+    const raw = localStorage.getItem(ROUTE_VALIDATION_STORAGE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map((day) => Number.parseInt(day, 10)).filter(Number.isFinite));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveValidatedRouteDays() {
+  try {
+    localStorage.setItem(ROUTE_VALIDATION_STORAGE_KEY, JSON.stringify(Array.from(_validatedRouteDays)));
+  } catch {
+    // Local storage can be unavailable in private browsing contexts.
+  }
+}
+
+function isRouteDayValidated(day) {
+  return _validatedRouteDays.has(Number.parseInt(day, 10));
+}
+
+function setRouteDayValidated(day, isValidated) {
+  const normalizedDay = Number.parseInt(day, 10);
+  if (!Number.isFinite(normalizedDay)) return;
+  if (isValidated) {
+    _validatedRouteDays.add(normalizedDay);
+  } else {
+    _validatedRouteDays.delete(normalizedDay);
+  }
+  saveValidatedRouteDays();
+}
+
+function loadCollapsedPlannerDays() {
+  try {
+    const raw = localStorage.getItem(PLANNER_COLLAPSED_DAYS_STORAGE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map((day) => Number.parseInt(day, 10)).filter(Number.isFinite));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedPlannerDays() {
+  try {
+    localStorage.setItem(PLANNER_COLLAPSED_DAYS_STORAGE_KEY, JSON.stringify(Array.from(_collapsedPlannerDays)));
+  } catch {
+    // Local storage can be unavailable in private browsing contexts.
+  }
+}
+
+function isPlannerDayCollapsed(day) {
+  return _collapsedPlannerDays.has(Number.parseInt(day, 10));
+}
+
+function setPlannerDayCollapsed(day, isCollapsed) {
+  const normalizedDay = Number.parseInt(day, 10);
+  if (!Number.isFinite(normalizedDay)) return;
+  if (isCollapsed) {
+    _collapsedPlannerDays.add(normalizedDay);
+  } else {
+    _collapsedPlannerDays.delete(normalizedDay);
+  }
+  saveCollapsedPlannerDays();
+}
+
+function setAllPlannerDaysCollapsed(isCollapsed) {
+  _collapsedPlannerDays = new Set();
+  if (isCollapsed) {
+    for (let day = 1; day <= _totalTripDays; day += 1) {
+      _collapsedPlannerDays.add(day);
+    }
+  }
+  saveCollapsedPlannerDays();
 }
 
 function destroyPlannerMap() {
@@ -283,6 +376,21 @@ function getDropToastMessage(evt) {
   return 'Plan actualizado.';
 }
 
+function isNoopPlannerDrop(evt) {
+  if (!evt || evt.from !== evt.to) return false;
+  const oldIndex = Number.isFinite(evt.oldDraggableIndex) ? evt.oldDraggableIndex : evt.oldIndex;
+  const newIndex = Number.isFinite(evt.newDraggableIndex) ? evt.newDraggableIndex : evt.newIndex;
+  return Number.isFinite(oldIndex) && Number.isFinite(newIndex) && oldIndex === newIndex;
+}
+
+function getNoopDropToastMessage(evt) {
+  const placeName = getPlaceName(evt.item?.dataset?.id);
+  const day = Number.parseInt(evt.to?.closest('.planner-day-block')?.dataset.day || '', 10);
+  if (Number.isFinite(day)) return `${placeName} se mantiene en la misma posición del Dia ${day}.`;
+  if (getZoneFromElement(evt.to) === 'tray') return `${placeName} se mantiene en la misma posición de la bandeja.`;
+  return 'Sin cambios en el plan.';
+}
+
 function getStateToastMessage(placeId, newStatus, assignedDay) {
   const placeName = getPlaceName(placeId);
 
@@ -469,6 +577,7 @@ function renderPlannerFilters(filteredCount) {
             <button class="search-clear ${_plannerFilterState.search ? 'visible' : ''}" id="planner-search-clear">&#x2715;</button>
           </div>
           <div class="filters-inline-actions">
+            ${renderViewToggle('filters')}
             ${renderPlannerPriorityFilters(true)}
             <button class="maps-link-btn planner-export-btn" id="planner-export-btn" type="button">&#x1F4C4; Exportar itinerario</button>
             ${hasActivePlannerFilters() ? `<button class="clear-filters" id="planner-clear-filters">Limpiar filtros</button>` : ''}
@@ -486,6 +595,7 @@ function renderPlannerFilters(filteredCount) {
             ]
           })}
           ${renderPlannerScoreFilters()}
+          ${renderPlannerDayCollapseControls()}
         </div>
       </div>
     </div>
@@ -534,7 +644,12 @@ function buildMapModel(scope, groups) {
     })
     .filter((route) => route.allEntries.length > 0);
 
-  const distance = buildMapDistanceModel(routes);
+  const routesWithWalking = routes.map((route) => ({
+    ...route,
+    walkingSegments: buildWalkingRouteSegmentsForRoute(route)
+  }));
+  const distance = buildMapDistanceModel(routesWithWalking);
+  const walking = buildWalkingRouteModel(routesWithWalking);
 
   return {
     scope: normalizedScope,
@@ -544,8 +659,9 @@ function buildMapModel(scope, groups) {
     mappedCount: mappableEntries.length,
     missingCount: missingEntries.length,
     missingEntries,
-    routes,
-    distance
+    routes: routesWithWalking,
+    distance,
+    walking
   };
 }
 
@@ -582,6 +698,100 @@ function renderMiniCard(place, plannerItem) {
         </button>
       </div>
     </div>`;
+}
+
+function renderWalkingRouteLeg(segment) {
+  return `
+    <div class="walking-route-leg ${getWalkingRouteStatusClass(segment)}">
+      <span class="walking-route-leg-arrow">&darr;</span>
+      <span class="walking-route-leg-icon">&#x1F6B6;</span>
+      <span>${getWalkingRouteStatusText(segment)}</span>
+    </div>
+  `;
+}
+
+function renderRouteValidationToggle(day, options = {}) {
+  const isChecked = isRouteDayValidated(day);
+  const readonly = options.readonly === true;
+  const className = [
+    'planner-route-validation',
+    isChecked ? 'is-validated' : '',
+    readonly ? 'is-readonly' : ''
+  ].filter(Boolean).join(' ');
+  const label = 'Ruta';
+  const title = isChecked ? 'Ruta validada' : 'Validar ruta antes de calcular trayectos a pie';
+  return `
+    <label class="${className}" title="${title}">
+      <input type="checkbox" data-route-validation-day="${day}" ${isChecked ? 'checked' : ''} ${readonly ? 'disabled' : ''}>
+      <span class="planner-route-validation-box" aria-hidden="true">&#x2713;</span>
+      <span>${label}</span>
+    </label>
+  `;
+}
+
+function renderDayCoordinateWarning(entries) {
+  const invalidCount = entries.filter((entry) => !hasValidCoordinates(entry.place)).length;
+  if (!invalidCount) return '';
+  return `<span class="planner-day-coordinate-warning" title="Hay actividades sin latitud/longitud v&aacute;lidas">${invalidCount} sin coordenadas</span>`;
+}
+
+function renderDayPlannerCards(entries, day) {
+  if (!entries.length) return `<div class="planner-empty-day">Sin actividades asignadas</div>`;
+
+  const route = {
+    day,
+    color: getDayColor(day),
+    allEntries: entries.map((entry, index) => ({
+      ...entry,
+      day,
+      exportOrder: index + 1
+    }))
+  };
+  const walkingSegments = buildWalkingRouteSegmentsForRoute(route);
+
+  return entries.map(({ place, item }, index) => `
+    ${renderMiniCard(place, item)}
+    ${walkingSegments[index] ? renderWalkingRouteLeg(walkingSegments[index]) : ''}
+  `).join('');
+}
+
+function renderDayMapSummaryButton(day) {
+  return `
+    <button type="button" class="planner-day-map-btn" data-day-map-open="${day}" aria-label="Abrir mapa del Dia ${day}">
+      <span class="planner-day-map-btn-icon">&#x1F5FA;&#xFE0F;</span>
+      <span>Mapa</span>
+    </button>
+  `;
+}
+
+function renderDayCollapseButton(day) {
+  const isCollapsed = isPlannerDayCollapsed(day);
+  const stateClass = isCollapsed ? 'is-collapsed' : 'is-open';
+  return `
+    <button type="button"
+            class="planner-day-collapse-btn ${stateClass}"
+            data-planner-day-collapse="${day}"
+            aria-expanded="${isCollapsed ? 'false' : 'true'}"
+            title="${isCollapsed ? 'Expandir d&iacute;a' : 'Contraer d&iacute;a'}"
+            aria-label="${isCollapsed ? 'Expandir d&iacute;a' : 'Contraer d&iacute;a'}"
+            aria-controls="planner-day-cards-${day}">
+      <span class="planner-day-collapse-icon" aria-hidden="true">${renderChevronIcon(isCollapsed ? 'right' : 'down')}</span>
+    </button>
+  `;
+}
+
+function renderChevronIcon(direction = 'down') {
+  const points = direction === 'right' ? '9 6 15 12 9 18' : '6 9 12 15 18 9';
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="${points}"></polyline></svg>`;
+}
+
+function renderPlannerDayCollapseControls() {
+  return `
+    <div class="planner-days-collapse-actions" aria-label="Expandir o contraer dias">
+      <button type="button" class="planner-days-collapse-btn is-open" data-planner-days-collapse="expand" title="Expandir d&iacute;as" aria-label="Expandir d&iacute;as">${renderChevronIcon('down')}</button>
+      <button type="button" class="planner-days-collapse-btn is-collapsed" data-planner-days-collapse="collapse" title="Contraer d&iacute;as" aria-label="Contraer d&iacute;as">${renderChevronIcon('right')}</button>
+    </div>
+  `;
 }
 
 function getPlannerUmbrellaSVG(isFriendly) {
@@ -638,11 +848,11 @@ function renderModal(place) {
   });
 }
 
-function renderViewToggle() {
+function renderViewToggle(variant = 'hero') {
   const calendarHref = '/planner.html?view=calendar';
   const mapHref = '/planner.html?view=map';
   return `
-    <div class="planner-view-toggle">
+    <div class="planner-view-toggle ${variant === 'filters' ? 'planner-view-toggle-inline' : ''}">
       <a href="${calendarHref}" class="planner-view-btn ${_viewMode === 'calendar' ? 'active' : ''}" data-view-mode="calendar">Calendario</a>
       <a href="${mapHref}" class="planner-view-btn ${_viewMode === 'map' ? 'active' : ''}" data-view-mode="map">Mapa</a>
     </div>
@@ -728,12 +938,13 @@ function calculateHaversineDistanceKm(coordA, coordB) {
 
 function formatSegmentDistanceKm(distanceKm) {
   if (!Number.isFinite(distanceKm)) return 'N/D';
-  return `${distanceKm >= 1 ? distanceKm.toFixed(1) : distanceKm.toFixed(2)} km`;
+  const formattedDistance = distanceKm >= 1 ? distanceKm.toFixed(1) : distanceKm.toFixed(2);
+  return `${formattedDistance.replace('.', ',')} km`;
 }
 
 function formatTotalDistanceKm(distanceKm) {
   if (!Number.isFinite(distanceKm) || distanceKm <= 0) return '0 km';
-  return `${distanceKm.toFixed(1)} km`;
+  return `${distanceKm.toFixed(1).replace('.', ',')} km`;
 }
 
 function buildPlannerSegments(orderedEntries) {
@@ -804,6 +1015,150 @@ function buildMapDistanceModel(routes) {
   };
 }
 
+function buildWalkingRouteSegmentsForRoute(route) {
+  const segments = [];
+  const entries = route.allEntries || [];
+
+  for (let index = 1; index < entries.length; index += 1) {
+    const originEntry = entries[index - 1];
+    const destinationEntry = entries[index];
+    const originPlace = originEntry.place;
+    const destinationPlace = destinationEntry.place;
+    const cacheKey = buildWalkingRouteCacheKey(originPlace.id, destinationPlace.id);
+    const cachedRoute = _walkingRouteResults.get(cacheKey) || getCachedWalkingRoute(originPlace.id, destinationPlace.id);
+    const hasCoordinates = hasValidCoordinates(originPlace) && hasValidCoordinates(destinationPlace);
+    const routeData = cachedRoute || {
+      id: cacheKey,
+      mode: 'walking',
+      originPlaceId: originPlace.id,
+      destinationPlaceId: destinationPlace.id,
+      status: hasCoordinates ? 'pending' : 'missing-coordinates',
+      distanceMeters: null,
+      durationSeconds: null,
+      distanceText: null,
+      durationText: null,
+      latLngs: []
+    };
+
+    segments.push({
+      day: route.day,
+      color: route.color,
+      originEntry,
+      destinationEntry,
+      fromOrder: originEntry.exportOrder || index,
+      toOrder: destinationEntry.exportOrder || index + 1,
+      linearDistanceKm: getLinearDistanceKmBetweenPlaces(originPlace, destinationPlace),
+      route: routeData,
+      status: routeData.status
+    });
+  }
+
+  return segments;
+}
+
+function buildWalkingRouteSummary(segments) {
+  return segments.reduce((summary, segment) => {
+    const route = segment.route;
+    if (route?.status === 'ok') {
+      summary.calculatedCount += 1;
+      summary.distanceMeters += Number(route.distanceMeters) || 0;
+      summary.durationSeconds += Number(route.durationSeconds) || 0;
+    } else if (route?.status === 'missing-coordinates') {
+      summary.missingCount += 1;
+    } else if (route?.status === 'error') {
+      summary.errorCount += 1;
+    } else {
+      summary.pendingCount += 1;
+    }
+
+    return summary;
+  }, {
+    calculatedCount: 0,
+    pendingCount: 0,
+    errorCount: 0,
+    missingCount: 0,
+    distanceMeters: 0,
+    durationSeconds: 0
+  });
+}
+
+function buildWalkingRouteModel(routes) {
+  const segments = routes.flatMap((route) => route.walkingSegments || []);
+  return {
+    segments,
+    summary: buildWalkingRouteSummary(segments),
+    staleDays: Array.from(_walkingRouteStaleDays)
+  };
+}
+
+function getCalculableRouteDays(model) {
+  return (model.routes || [])
+    .filter((route) => (route.allEntries || []).length >= 2)
+    .map((route) => route.day);
+}
+
+function getRouteValidationModel(model) {
+  const days = getCalculableRouteDays(model);
+  const unvalidatedDays = days.filter((day) => !isRouteDayValidated(day));
+  return {
+    days,
+    unvalidatedDays,
+    canCalculate: days.length > 0 && unvalidatedDays.length === 0
+  };
+}
+
+function hasOnlyCalculatedWalkingSegments(model) {
+  const segments = model.walking?.segments || [];
+  return segments.length > 0 && segments.every((segment) => segment.route?.status === 'ok');
+}
+
+function confirmWalkingRouteRefresh(model) {
+  return new Promise((resolve) => {
+    const existingOverlay = document.getElementById('planner-route-confirm-overlay');
+    existingOverlay?.remove();
+
+    const segmentCount = model.walking?.segments?.length || 0;
+    const dayText = model.selectedDays?.length === 1
+      ? `el d&iacute;a ${model.selectedDays[0]}`
+      : 'estos d&iacute;as';
+    const overlay = document.createElement('div');
+    overlay.id = 'planner-route-confirm-overlay';
+    overlay.className = 'planner-route-confirm-overlay open';
+    overlay.innerHTML = `
+      <div class="planner-route-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="planner-route-confirm-title" tabindex="-1">
+        <div class="planner-route-confirm-kicker">Ahorro de consultas API</div>
+        <h3 id="planner-route-confirm-title">Las rutas ya est&aacute;n calculadas</h3>
+        <p>Hay ${segmentCount} tramo${segmentCount !== 1 ? 's' : ''} de ${dayText} ya resuelto${segmentCount !== 1 ? 's' : ''}. Recalcularlos volver&aacute; a consultar Google Routes.</p>
+        <div class="planner-route-confirm-actions">
+          <button type="button" class="planner-route-confirm-btn planner-route-confirm-cancel" data-route-confirm="cancel">Mantener rutas</button>
+          <button type="button" class="planner-route-confirm-btn planner-route-confirm-accept" data-route-confirm="accept">Recalcular igualmente</button>
+        </div>
+      </div>
+    `;
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') close(false);
+    };
+
+    const close = (result) => {
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.classList.remove('open');
+      window.setTimeout(() => overlay.remove(), 180);
+      resolve(result);
+    };
+
+    overlay.addEventListener('click', (event) => {
+      const action = event.target.closest('[data-route-confirm]')?.dataset.routeConfirm;
+      if (action === 'accept') close(true);
+      if (action === 'cancel' || event.target === overlay) close(false);
+    });
+
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', onKeyDown);
+    overlay.querySelector('.planner-route-confirm-cancel')?.focus();
+  });
+}
+
 function renderDistanceSummary(model) {
   const summary = model.distance.summary;
   const longestText = summary.longestSegment
@@ -820,12 +1175,90 @@ function renderDistanceSummary(model) {
   `;
 }
 
-function renderDistanceSegmentsList(model) {
-  const segments = model.distance.segments;
+function getWalkingRouteStatusText(segment) {
+  const route = segment.route;
+  if (route?.status === 'ok') {
+    return `${route.durationText || formatRouteDuration(route.durationSeconds)} &middot; ${route.distanceText || formatRouteDistance(route.distanceMeters)}`;
+  }
+  if (route?.status === 'missing-coordinates') return 'Sin coordenadas suficientes';
+  if (route?.status === 'error') return 'No disponible &middot; linea estimada en mapa';
+  const linearDistanceText = Number.isFinite(segment.linearDistanceKm)
+    ? ` (${formatSegmentDistanceKm(segment.linearDistanceKm)} lineales)`
+    : '';
+  return `Pendiente de calcular${linearDistanceText}`;
+}
+
+function getWalkingRouteStatusClass(segment) {
+  if (segment.route?.status === 'ok') return 'walking-route-leg-ok';
+  if (segment.route?.status === 'error') return 'walking-route-leg-error';
+  if (segment.route?.status === 'missing-coordinates') return 'walking-route-leg-error';
+  return 'walking-route-leg-pending';
+}
+
+function renderWalkingRouteControls(model) {
+  const summary = model.walking.summary;
+  const hasSegments = model.walking.segments.length > 0;
+  const hasCalculated = summary.calculatedCount > 0;
+  const routeValidation = getRouteValidationModel(model);
+  const isRouteActionDisabled = !hasSegments || _walkingRoutesLoading || !routeValidation.canCalculate;
+  const staleInScope = model.selectedDays.some((day) => _walkingRouteStaleDays.has(day));
+  const statusText = _walkingRoutesLoading
+    ? 'Calculando rutas a pie...'
+    : _walkingRouteMessage || (staleInScope ? 'Rutas pendientes de actualizar' : '');
+  const validationHint = routeValidation.unvalidatedDays.length
+    ? `Valida ${routeValidation.unvalidatedDays.length === 1 ? `el d&iacute;a ${routeValidation.unvalidatedDays[0]}` : 'los d&iacute;as con rutas'} antes de llamar a la API.`
+    : '';
+
+  return `
+    <div class="walking-route-actions">
+      <div class="walking-route-action-copy">
+        <strong>Rutas a pie por calles</strong>
+        <span>${validationHint || (hasCalculated ? 'Usando rutas reales calculadas por Google Routes.' : 'Calcula los desplazamientos andando cuando quieras.')}</span>
+      </div>
+      <div class="walking-route-buttons">
+        <button type="button" class="walking-route-btn" data-walking-route-action="calculate" ${isRouteActionDisabled ? 'disabled' : ''}>
+          ${hasCalculated ? 'Calcular faltantes' : 'Calcular rutas a pie'}
+        </button>
+        <button type="button" class="walking-route-btn walking-route-btn-secondary" data-walking-route-action="refresh" ${isRouteActionDisabled ? 'disabled' : ''}>
+          Actualizar rutas a pie
+        </button>
+      </div>
+      ${statusText ? `<div class="walking-route-status walking-route-status-${_walkingRouteMessageTone}">${statusText}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderWalkingRouteSummary(model) {
+  const summary = model.walking.summary;
+  if (!model.walking.segments.length) {
+    return `<div class="walking-route-summary">Desplazamientos a pie: sin tramos en este alcance</div>`;
+  }
+
+  if (summary.calculatedCount === 0) {
+    return `<div class="walking-route-summary">Desplazamientos a pie pendientes de calcular${summary.missingCount ? ` &middot; ${summary.missingCount} sin coordenadas` : ''}</div>`;
+  }
+
+  const details = [
+    `${summary.calculatedCount} tramo${summary.calculatedCount !== 1 ? 's' : ''}`,
+    formatRouteDistance(summary.distanceMeters),
+    formatRouteDuration(summary.durationSeconds),
+    summary.pendingCount ? `${summary.pendingCount} pendiente${summary.pendingCount !== 1 ? 's' : ''}` : '',
+    summary.errorCount ? `${summary.errorCount} no disponible${summary.errorCount !== 1 ? 's' : ''}` : '',
+    summary.missingCount ? `${summary.missingCount} sin coordenadas` : ''
+  ].filter(Boolean);
+
+  return `<div class="walking-route-summary">Desplazamientos a pie: ${details.join(' &middot; ')}</div>`;
+}
+
+function renderDistanceSegmentsList(model, options = {}) {
+  const segments = model.walking.segments;
+  const headingAddon = Number.isFinite(options.day)
+    ? renderRouteValidationToggle(options.day, { readonly: true })
+    : '';
   if (!segments.length && model.plannedCount > 1) {
     return `
       <aside class="planner-map-segments-card">
-        <h4>Tramos en l&iacute;nea recta</h4>
+        <div class="planner-map-segments-heading"><h4>Tramos a pie</h4>${headingAddon}</div>
         <p class="planner-map-segments-empty">No hay tramos calculables con coordenadas v&aacute;lidas.</p>
       </aside>
     `;
@@ -834,40 +1267,43 @@ function renderDistanceSegmentsList(model) {
 
   const showDay = model.scope === 'all';
   const rows = segments.map((segment) => `
-    <li class="planner-map-segment-row">
+    <li class="planner-map-segment-row ${getWalkingRouteStatusClass(segment)}">
       <div class="planner-map-segment-main">
         <span class="planner-map-segment-orders">${segment.fromOrder} &rarr; ${segment.toOrder}</span>
-        <span class="planner-map-segment-names">${escapeHtml(segment.fromPlace.name)} &rarr; ${escapeHtml(segment.toPlace.name)}</span>
+        <span class="planner-map-segment-names">${escapeHtml(segment.originEntry.place.name)} &rarr; ${escapeHtml(segment.destinationEntry.place.name)}</span>
         ${showDay ? `<span class="planner-map-segment-day">D&iacute;a ${segment.day}</span>` : ''}
       </div>
-      <strong>${formatSegmentDistanceKm(segment.distanceKm)}</strong>
+      <span class="planner-map-segment-status">${getWalkingRouteStatusText(segment)}</span>
     </li>
   `).join('');
 
   return `
     <aside class="planner-map-segments-card">
-      <h4>Tramos en l&iacute;nea recta</h4>
+      <div class="planner-map-segments-heading"><h4>Tramos a pie</h4>${headingAddon}</div>
       <ul>${rows}</ul>
     </aside>
   `;
 }
 
-function renderPlannerMapRouteAction(model) {
-  if (model.scope === 'all') return '';
-
-  const route = model.routes.find((candidate) => candidate.day === model.scope);
-  const validEntries = route?.entries || [];
-  const routeUrl = getGoogleMapsRouteUrl(validEntries, { travelMode: 'walking', maxWaypoints: 8 });
+function renderGoogleMapsRouteButton(entries, variant = '') {
+  const routeUrl = getGoogleMapsRouteUrl(entries || [], { travelMode: 'walking', maxWaypoints: 8 });
   const disabledClass = routeUrl ? '' : ' is-disabled';
   const href = routeUrl || '#';
 
   return `
-    <div class="planner-map-route-actions">
+    <div class="planner-map-route-actions ${variant}">
       <a class="planner-map-route-link${disabledClass}" href="${href}" target="_blank" rel="noopener" aria-disabled="${routeUrl ? 'false' : 'true'}">
-        Abrir ruta en Google Maps
+        <span class="planner-map-route-link-icon" aria-hidden="true">&#x1F4CD;</span>
+        <span>Google Maps</span>
       </a>
     </div>
   `;
+}
+
+function renderPlannerMapRouteAction(model) {
+  if (model.scope === 'all') return '';
+  const route = model.routes.find((candidate) => candidate.day === model.scope);
+  return renderGoogleMapsRouteButton(route?.entries || []);
 }
 
 function renderMapPanel(model) {
@@ -882,6 +1318,8 @@ function renderMapPanel(model) {
     <div class="planner-map-layout">
       <div class="planner-map-toolbar">
         ${renderMapScopeBar(model)}
+        ${renderWalkingRouteControls(model)}
+        ${renderWalkingRouteSummary(model)}
         ${renderDistanceSummary(model)}
       </div>
 
@@ -948,9 +1386,13 @@ function getExportDaySummary(entries) {
 }
 
 function getExportDistanceModel(entries) {
+  const walkingDistance = buildExportWalkingDistanceModel(entries);
+  if (walkingDistance) return walkingDistance;
+
   const { segments, omittedCount } = buildPlannerSegments(entries);
   const summary = calculateDayDistanceSummary(segments);
   return {
+    mode: 'linear',
     segments,
     omittedCount,
     summary,
@@ -958,9 +1400,98 @@ function getExportDistanceModel(entries) {
   };
 }
 
+function getLinearDistanceKmBetweenPlaces(originPlace, destinationPlace) {
+  const originCoord = getPlaceLatLng(originPlace);
+  const destinationCoord = getPlaceLatLng(destinationPlace);
+  if (!originCoord || !destinationCoord) return null;
+  return calculateHaversineDistanceKm(originCoord, destinationCoord);
+}
+
+function formatEstimatedLinearDistanceNote(distanceKm, prefix = '+ ') {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return '';
+  return `${prefix}${formatSegmentDistanceKm(distanceKm).replace(' km', ' km lineales estimados')}`;
+}
+
+function buildExportWalkingDistanceModel(entries) {
+  if (!Array.isArray(entries) || entries.length < 2) return null;
+
+  const route = {
+    day: entries[0]?.day || 1,
+    color: getDayColor(entries[0]?.day || 1),
+    entries,
+    allEntries: entries
+  };
+  const walkingSegments = buildWalkingRouteSegmentsForRoute(route);
+  const summary = buildWalkingRouteSummary(walkingSegments);
+  if (!summary.calculatedCount) return null;
+
+  const segments = walkingSegments.map((segment) => {
+    const fromPlace = segment.originEntry.place;
+    const toPlace = segment.destinationEntry.place;
+    const fromCoord = getPlaceLatLng(fromPlace);
+    const toCoord = getPlaceLatLng(toPlace);
+    const fallbackLatLngs = [fromCoord, toCoord]
+      .filter(Boolean)
+      .map((coord) => [coord.lat, coord.lng]);
+    const realLatLngs = hasUsablePolyline(segment.route) ? segment.route.latLngs : [];
+    const linearDistanceKm = getLinearDistanceKmBetweenPlaces(fromPlace, toPlace);
+    const distanceKm = Number.isFinite(segment.route?.distanceMeters)
+      ? segment.route.distanceMeters / 1000
+      : null;
+
+    return {
+      ...segment,
+      fromPlace,
+      toPlace,
+      distanceKm,
+      linearDistanceKm,
+      durationSeconds: Number.isFinite(segment.route?.durationSeconds) ? segment.route.durationSeconds : null,
+      latLngs: realLatLngs.length >= 2 ? realLatLngs : fallbackLatLngs,
+      hasRealRoute: realLatLngs.length >= 2
+    };
+  });
+
+  const estimatedLinearDistanceKm = segments.reduce((sum, segment) => (
+    !segment.hasRealRoute && Number.isFinite(segment.linearDistanceKm)
+      ? sum + segment.linearDistanceKm
+      : sum
+  ), 0);
+
+  const longestSegment = segments.reduce((longest, segment) => (
+    Number.isFinite(segment.distanceKm) && (!longest || segment.distanceKm > longest.distanceKm)
+      ? segment
+      : longest
+  ), null);
+
+  return {
+    mode: 'walking',
+    segments,
+    omittedCount: summary.missingCount,
+    summary: {
+      ...summary,
+      segmentCount: segments.length,
+      totalDistanceKm: summary.distanceMeters / 1000,
+      estimatedLinearDistanceKm,
+      longestSegment
+    },
+    densityLabel: getDistanceDensityLabel(summary.distanceMeters / 1000)
+  };
+}
+
 function getPdfDaySummaryItems(dayData) {
   const summary = getExportDaySummary(dayData.entries);
   const distance = getExportDistanceModel(dayData.entries);
+  if (distance.mode === 'walking') {
+    const estimatedNote = formatEstimatedLinearDistanceNote(distance.summary.estimatedLinearDistanceKm, '+ ');
+    return [
+      `${summary.activityCount} actividades`,
+      `${summary.totalDurationText} visitas`,
+      `${formatRouteDistance(distance.summary.distanceMeters)} a pie${estimatedNote ? ` (${estimatedNote})` : ''}`,
+      `${formatRouteDuration(distance.summary.durationSeconds)} desplazamientos`,
+      `${summary.ticketCount} con entrada/reserva`,
+      `${summary.rainyCount} aptas lluvia`
+    ].filter(Boolean);
+  }
   const longestText = distance.summary.longestSegment
     ? `tramo más largo ${formatSegmentDistanceKm(distance.summary.longestSegment.distanceKm)}`
     : null;
@@ -1181,19 +1712,31 @@ function drawPdfSummaryCard(doc, x, y, width, stats, layout) {
     doc.setFontSize(9);
     setPdfColor(doc, layout.accent);
     doc.text(toPdfText(stat.value), columnX + 4, y + 5);
+    if (stat.note) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5);
+      setPdfColor(doc, layout.muted);
+      doc.text(toPdfText(stat.note), columnX + 4, y + 7.5);
+    }
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
+    doc.setFontSize(6.1);
     setPdfColor(doc, layout.muted);
-    doc.text(toPdfText(stat.label).toUpperCase(), columnX + 4, y + 9.2);
+    doc.text(toPdfText(stat.label).toUpperCase(), columnX + 4, y + 10.2);
   });
 }
 
 function drawPdfCover(doc, layout, days, exportType) {
   const totalActivities = days.reduce((sum, dayData) => sum + dayData.entries.length, 0);
   const totalMinutes = days.reduce((sum, dayData) => sum + getExportDaySummary(dayData.entries).totalMinutes, 0);
-  const totalLinearDistanceKm = days.reduce((sum, dayData) => (
-    sum + getExportDistanceModel(dayData.entries).summary.totalDistanceKm
-  ), 0);
+  const distanceTotals = days.reduce((totals, dayData) => {
+    const distance = getExportDistanceModel(dayData.entries);
+    totals.totalDistanceKm += distance.summary.totalDistanceKm;
+    totals.estimatedLinearDistanceKm += distance.summary.estimatedLinearDistanceKm || 0;
+    return totals;
+  }, {
+    totalDistanceKm: 0,
+    estimatedLinearDistanceKm: 0
+  });
   let y = layout.marginTop;
 
   doc.setFont('helvetica', 'bold');
@@ -1211,7 +1754,13 @@ function drawPdfCover(doc, layout, days, exportType) {
     { label: 'dias exportados', value: String(days.length) },
     { label: 'actividades', value: String(totalActivities) },
     { label: 'visitas estimadas', value: formatDurationMinutes(totalMinutes, { approximate: true }) || 'N/D' },
-    { label: 'distancia lineal total', value: formatTotalDistanceKm(totalLinearDistanceKm) }
+    {
+      label: distanceTotals.estimatedLinearDistanceKm > 0 ? 'distancia total (+ estimada)' : 'distancia total',
+      value: formatTotalDistanceKm(distanceTotals.totalDistanceKm),
+      note: distanceTotals.estimatedLinearDistanceKm > 0
+        ? `(+ ${formatSegmentDistanceKm(distanceTotals.estimatedLinearDistanceKm)} lineales estimados)`
+        : ''
+    }
   ], layout);
   y += 17;
 
@@ -1438,12 +1987,13 @@ function getExportMapMarkerHtml(entry, color, compact) {
   `;
 }
 
-async function captureLeafletMapForPdf(entries, compact = false) {
+async function captureLeafletMapForPdf(entries, compact = false, distanceModel = null) {
   const html2canvas = getHtml2Canvas();
   if (!html2canvas || typeof L === 'undefined') return null;
 
   const mapEntries = getExportMapEntries(entries);
   if (!mapEntries.length) return null;
+  const routeModel = distanceModel || getExportDistanceModel(entries);
 
   const widthPx = 1180;
   const heightPx = 390;
@@ -1477,16 +2027,35 @@ async function captureLeafletMapForPdf(entries, compact = false) {
     tileLayer.addTo(map);
 
     const routeColor = getDayColor(entries[0]?.day || 1);
-    const latLngs = mapEntries.map((entry) => [entry.latLng.lat, entry.latLng.lng]);
+    const boundsLatLngs = [...mapEntries.map((entry) => [entry.latLng.lat, entry.latLng.lng])];
 
-    if (latLngs.length > 1) {
-      L.polyline(latLngs, {
-        color: routeColor,
-        weight: 3,
-        opacity: 0.88,
-        lineJoin: 'round',
-        lineCap: 'round'
-      }).addTo(map);
+    if (routeModel.mode === 'walking' && routeModel.segments.length) {
+      routeModel.segments.forEach((segment) => {
+        const segmentLatLngs = Array.isArray(segment.latLngs) ? segment.latLngs : [];
+        if (segmentLatLngs.length < 2) return;
+
+        boundsLatLngs.push(...segmentLatLngs);
+        L.polyline(segmentLatLngs, {
+          color: routeColor,
+          weight: segment.hasRealRoute ? 4 : 2.2,
+          opacity: segment.hasRealRoute ? 0.9 : 0.38,
+          lineJoin: 'round',
+          lineCap: 'round',
+          dashArray: segment.hasRealRoute ? null : '7 9'
+        }).addTo(map);
+      });
+    } else {
+      const latLngs = mapEntries.map((entry) => [entry.latLng.lat, entry.latLng.lng]);
+      if (latLngs.length > 1) {
+        boundsLatLngs.push(...latLngs);
+        L.polyline(latLngs, {
+          color: routeColor,
+          weight: 3,
+          opacity: 0.88,
+          lineJoin: 'round',
+          lineCap: 'round'
+        }).addTo(map);
+      }
     }
 
     mapEntries.forEach((entry) => {
@@ -1500,10 +2069,10 @@ async function captureLeafletMapForPdf(entries, compact = false) {
     });
 
     map.invalidateSize({ pan: false });
-    if (latLngs.length === 1) {
-      map.setView(latLngs[0], 15, { animate: false });
+    if (boundsLatLngs.length === 1) {
+      map.setView(boundsLatLngs[0], 15, { animate: false });
     } else {
-      map.fitBounds(latLngs, { padding: [22, 22], animate: false });
+      map.fitBounds(boundsLatLngs, { padding: [22, 22], animate: false });
     }
 
     await Promise.race([tilesReady, wait(EXPORT_MAP_TILE_TIMEOUT_MS)]);
@@ -1541,8 +2110,9 @@ async function captureLeafletMapForPdf(entries, compact = false) {
 async function drawPdfRouteMapWithFallback(doc, layout, entries, y, compact = false) {
   const mapHeight = getPdfMapHeight(false);
   y = ensurePdfSpace(doc, layout, y, mapHeight + 8);
+  const distanceModel = getExportDistanceModel(entries);
 
-  const capturedMap = await captureLeafletMapForPdf(entries, false);
+  const capturedMap = await captureLeafletMapForPdf(entries, false, distanceModel);
   if (!capturedMap) {
     return drawPdfRouteMap(doc, layout, entries, y, false);
   }
@@ -1560,8 +2130,39 @@ async function drawPdfRouteMapWithFallback(doc, layout, entries, y, compact = fa
 function getPdfDistanceBlockHeight(distanceModel, detailed) {
   if (!detailed) return 30;
   const segmentRows = Math.max(distanceModel.segments.length, 1);
-  const warningHeight = distanceModel.omittedCount ? 8 : 0;
+  const warningHeight = getPdfDistanceWarningText(distanceModel) ? 8 : 0;
   return 42 + warningHeight + segmentRows * 9.2;
+}
+
+function getPdfDistanceBlockTitle(distanceModel) {
+  return distanceModel.mode === 'walking' ? 'Rutas a pie del dia' : 'Distancias lineales del dia';
+}
+
+function getPdfDistanceWarningText(distanceModel) {
+  if (distanceModel.mode === 'walking') {
+    const { pendingCount, errorCount, missingCount } = distanceModel.summary;
+    if (missingCount) return 'Algunos tramos no pueden calcularse por falta de coordenadas.';
+    if (errorCount) return 'Algunos tramos muestran una linea estimada por falta de respuesta de ruta.';
+    if (pendingCount) return 'Algunos tramos siguen pendientes y muestran linea estimada.';
+    return '';
+  }
+
+  return distanceModel.omittedCount ? 'Algunos tramos pueden omitirse si faltan coordenadas' : '';
+}
+
+function getPdfWalkingRouteSegmentMetric(segment) {
+  if (segment.route?.status === 'ok') {
+    return `${segment.route.durationText || formatRouteDuration(segment.route.durationSeconds)} | ${segment.route.distanceText || formatRouteDistance(segment.route.distanceMeters)}`;
+  }
+  if (segment.route?.status === 'pending') {
+    const estimate = Number.isFinite(segment.linearDistanceKm)
+      ? ` (${formatSegmentDistanceKm(segment.linearDistanceKm)})`
+      : '';
+    return `pendiente${estimate}`;
+  }
+  if (segment.route?.status === 'missing-coordinates') return 'sin coordenadas';
+  if (segment.route?.status === 'error') return 'linea estimada';
+  return 'pendiente';
 }
 
 function getDistanceKpiIconSvg(icon) {
@@ -1593,12 +2194,15 @@ function getDistanceKpiIconSvg(icon) {
   return icons[icon] || icons.ruler;
 }
 
-function renderDistanceKpiCard({ icon, value, label }) {
+function renderDistanceKpiCard({ icon, value, label, note = '' }) {
   return `
     <div class="distance-kpi-card">
       ${getDistanceKpiIconSvg(icon)}
       <div>
-        <div class="distance-kpi-value">${escapeHtml(value)}</div>
+        <div class="distance-kpi-head">
+          <div class="distance-kpi-value">${escapeHtml(value)}</div>
+          ${note ? `<div class="distance-kpi-note">${escapeHtml(note)}</div>` : ''}
+        </div>
         <div class="distance-kpi-label">${escapeHtml(label)}</div>
       </div>
     </div>
@@ -1649,33 +2253,50 @@ async function captureDistanceKpiCardsForPdf(stats, widthPx) {
       .distance-kpi-card {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         min-height: 64px;
-        padding: 12px 16px;
+        padding: 12px 14px;
         background: #ffffff;
         border: 1px solid #e5e7eb;
         border-radius: 12px;
         box-sizing: border-box;
       }
       .distance-kpi-icon {
-        width: 26px;
-        height: 26px;
+        width: 24px;
+        height: 24px;
         color: #ef476f;
         flex: 0 0 auto;
       }
+      .distance-kpi-card > div {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .distance-kpi-head {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        min-width: 0;
+      }
       .distance-kpi-value {
-        font-size: 19px;
+        font-size: 17px;
         line-height: 1.1;
         font-weight: 700;
         color: #0f172a;
         white-space: nowrap;
       }
       .distance-kpi-label {
-        margin-top: 3px;
-        font-size: 11px;
+        margin-top: 2px;
+        font-size: 9.8px;
         line-height: 1.2;
         color: #64748b;
+        white-space: normal;
+      }
+      .distance-kpi-note {
+        font-size: 8.8px;
+        line-height: 1.1;
+        color: #94a3b8;
         white-space: nowrap;
+        flex: 0 1 auto;
       }
     </style>
     ${renderDistanceKpiCards(stats)}
@@ -1709,7 +2330,7 @@ async function captureDistanceKpiCardsForPdf(stats, widthPx) {
 
 function drawPdfDistanceKpiFallback(doc, layout, stats, x, y, width) {
   const gap = 4;
-  const cardHeight = 17;
+  const cardHeight = 20;
   const statWidth = (width - gap * 2) / 3;
   stats.forEach((stat, index) => {
     const cardX = x + (statWidth + gap) * index;
@@ -1721,10 +2342,16 @@ function drawPdfDistanceKpiFallback(doc, layout, stats, x, y, width) {
     doc.setFontSize(10);
     setPdfColor(doc, layout.dark);
     doc.text(toPdfText(stat.value), cardX + 5, y + 7);
+    if (stat.note) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(5.4);
+      setPdfColor(doc, layout.muted);
+      doc.text(toPdfText(stat.note), cardX + 5, y + 10.5);
+    }
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.4);
+    doc.setFontSize(6.1);
     setPdfColor(doc, layout.muted);
-    doc.text(toPdfText(stat.label), cardX + 5, y + 12.2);
+    doc.text(toPdfText(stat.label), cardX + 5, y + 15.2);
   });
   return y + cardHeight + 4;
 }
@@ -1769,20 +2396,30 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
   doc.setFontSize(11);
   setPdfColor(doc, layout.dark);
   drawPdfDistanceTitleIcon(doc, x + 4, y - 5.3, layout.dark);
-  doc.text('Distancias lineales del día', x + 16, y);
+  doc.text(getPdfDistanceBlockTitle(distance), x + 16, y);
   y += 8;
 
   const longestText = distance.summary.longestSegment
-    ? formatSegmentDistanceKm(distance.summary.longestSegment.distanceKm)
+    ? distance.mode === 'walking'
+      ? formatRouteDistance(distance.summary.longestSegment.route?.distanceMeters)
+      : formatSegmentDistanceKm(distance.summary.longestSegment.distanceKm)
     : 'N/D';
 
   if (!detailed) {
-    const line = [
-      `${formatTotalDistanceKm(distance.summary.totalDistanceKm)} lineales`,
-      `${distance.summary.segmentCount} tramos`,
-      `tramo más largo ${longestText}`,
-      `dispersion: ${distance.densityLabel}`
-    ].join(' · ');
+    const line = distance.mode === 'walking'
+      ? [
+          `${formatRouteDistance(distance.summary.distanceMeters)} a pie${distance.summary.estimatedLinearDistanceKm > 0 ? ` (+ ${formatSegmentDistanceKm(distance.summary.estimatedLinearDistanceKm)} lineales estimados)` : ''}`,
+          `${formatRouteDuration(distance.summary.durationSeconds)} desplazamientos`,
+          `${distance.summary.segmentCount} tramos`,
+          `tramo mas largo ${longestText}`,
+          `dispersion: ${distance.densityLabel}`
+        ].join(' | ')
+      : [
+          `${formatTotalDistanceKm(distance.summary.totalDistanceKm)} lineales`,
+          `${distance.summary.segmentCount} tramos`,
+          `tramo mas largo ${longestText}`,
+          `dispersion: ${distance.densityLabel}`
+        ].join(' | ');
     y = drawWrappedPdfText(doc, line, x + 5, y + 2, width - 10, {
       fontSize: 8,
       lineHeight: 3.8,
@@ -1794,8 +2431,15 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
 
   const kpiStats = [{
     icon: 'ruler',
-    value: formatTotalDistanceKm(distance.summary.totalDistanceKm),
-    label: 'distancia lineal total'
+    value: distance.mode === 'walking'
+      ? formatRouteDistance(distance.summary.distanceMeters)
+      : formatTotalDistanceKm(distance.summary.totalDistanceKm),
+    label: distance.mode === 'walking'
+      ? `distancia a pie total${distance.summary.estimatedLinearDistanceKm > 0 ? ' (+ estimada)' : ''}`
+      : 'distancia lineal total',
+    note: distance.mode === 'walking' && distance.summary.estimatedLinearDistanceKm > 0
+      ? `(+ ${formatSegmentDistanceKm(distance.summary.estimatedLinearDistanceKm)} lineales estimados)`
+      : ''
   }, {
     icon: 'segments',
     value: String(distance.summary.segmentCount),
@@ -1803,7 +2447,7 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
   }, {
     icon: 'mountain',
     value: longestText,
-    label: 'tramo más largo'
+    label: distance.mode === 'walking' ? 'tramo a pie mas largo' : 'tramo mas largo'
   }];
   const kpiWidthMm = width - 8;
   const cssPxPerMm = 96 / 25.4;
@@ -1817,19 +2461,20 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
     y = drawPdfDistanceKpiFallback(doc, layout, kpiStats, x + 4, y, width - 8);
   }
 
-  if (distance.omittedCount) {
+  const warningText = getPdfDistanceWarningText(distance);
+  if (warningText) {
     setPdfColor(doc, '#fffbeb', 'fill');
     setPdfColor(doc, '#fde68a', 'draw');
     doc.roundedRect(x + 4, y, width - 8, 6, 2, 2, 'FD');
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.2);
     setPdfColor(doc, '#92400e');
-    doc.text('Algunos tramos pueden omitirse si faltan coordenadas', x + 8, y + 4);
+    doc.text(toPdfText(warningText), x + 8, y + 4);
     y += 8;
   }
 
   if (!distance.segments.length) {
-    y = drawWrappedPdfText(doc, 'Sin tramos calculables en linea recta.', x + 5, y + 3, width - 10, {
+    y = drawWrappedPdfText(doc, distance.mode === 'walking' ? 'Sin tramos a pie calculables.' : 'Sin tramos calculables en linea recta.', x + 5, y + 3, width - 10, {
       fontSize: 7,
       lineHeight: 3.6,
       color: layout.muted
@@ -1868,7 +2513,10 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.8);
     setPdfColor(doc, layout.dark);
-    doc.text(formatSegmentDistanceKm(segment.distanceKm), x + width - 5, rowTop + 4.2, { align: 'right' });
+    const segmentMetric = distance.mode === 'walking'
+      ? getPdfWalkingRouteSegmentMetric(segment)
+      : formatSegmentDistanceKm(segment.distanceKm);
+    doc.text(toPdfText(segmentMetric), x + width - 5, rowTop + 4.2, { align: 'right' });
     y += 9.2;
   });
 
@@ -2285,22 +2933,30 @@ function renderPlannerPage() {
     const day = i + 1;
     const entries = groups[day];
     const summary = getDaySummary(entries);
+    const routeAction = entries.length ? renderGoogleMapsRouteButton(entries, 'planner-day-inline-route') : '';
+    const coordinateWarning = renderDayCoordinateWarning(entries);
+    const isCollapsed = isPlannerDayCollapsed(day);
     return `
-      <div class="planner-day-block" data-day="${day}">
+      <div class="planner-day-block ${isCollapsed ? 'is-collapsed' : ''}" data-day="${day}">
         <div class="planner-day-header">
+          ${renderDayCollapseButton(day)}
           <div class="planner-day-number">${day}</div>
-          <div>
+          <div class="planner-day-summary">
             <div class="planner-day-label">${formatDayLabel(day)}</div>
             <div class="planner-day-count">
               <span>${summary.activityText}</span>
               ${summary.durationText ? `<span class="planner-day-summary-sep">&middot;</span><span>${summary.durationText}</span>` : ''}
+              ${coordinateWarning ? `<span class="planner-day-summary-sep">&middot;</span>${coordinateWarning}` : ''}
             </div>
           </div>
+          <div class="planner-day-header-actions">
+            ${routeAction}
+            ${entries.length ? renderDayMapSummaryButton(day) : ''}
+            ${entries.length ? renderRouteValidationToggle(day) : ''}
+          </div>
         </div>
-        <div class="planner-day-cards">
-          ${entries.length === 0
-            ? `<div class="planner-empty-day">Sin actividades asignadas</div>`
-            : entries.map(({ place, item }) => renderMiniCard(place, item)).join('')}
+        <div class="planner-day-cards" id="planner-day-cards-${day}">
+          ${renderDayPlannerCards(entries, day)}
         </div>
       </div>`;
   }).join('');
@@ -2337,7 +2993,6 @@ function renderPlannerPage() {
           <div class="planner-stat"><span class="planner-stat-number">${trayCount}</span><span>en bandeja</span></div>
           <div class="planner-stat"><span class="planner-stat-number">${doneCount}</span><span>realizadas</span></div>
         </div>
-        ${renderViewToggle()}
       </div>
     </div>
 
@@ -2350,6 +3005,9 @@ function renderPlannerPage() {
     </div>
     <div class="modal-overlay" id="planner-export-overlay">
       <div class="modal" id="planner-export-modal"></div>
+    </div>
+    <div class="modal-overlay" id="planner-day-map-overlay">
+      <div class="modal planner-day-map-modal" id="planner-day-map-modal"></div>
     </div>
   `;
 
@@ -2482,6 +3140,119 @@ function closePlaceModal() {
   document.body.style.overflow = '';
 }
 
+function destroyPlannerDayMapModal() {
+  if (_plannerDayMap?.remove) {
+    _plannerDayMap.remove();
+  }
+  _plannerDayMap = null;
+}
+
+function closePlannerDayMapModal() {
+  destroyPlannerDayMapModal();
+  _plannerDayMapModalDay = null;
+  document.getElementById('planner-day-map-overlay')?.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function renderPlannerDayMapOverlay(model, day) {
+  const staleInScope = model.selectedDays.some((selectedDay) => _walkingRouteStaleDays.has(selectedDay));
+  const statusText = _walkingRoutesLoading
+    ? 'Calculando rutas a pie...'
+    : _walkingRouteMessage || (staleInScope ? 'Rutas pendientes de actualizar' : '');
+  const routeEntries = model.routes.find((route) => route.day === day)?.entries || [];
+  const routeValidation = getRouteValidationModel(model);
+  const isRouteActionDisabled = !model.walking.segments.length || _walkingRoutesLoading || !routeValidation.canCalculate;
+
+  return `
+    <div class="planner-day-map-modal-scroll">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <div>
+          <h2>Mapa del ${formatDayLabel(day)}</h2>
+          <div class="place-card-category" style="margin:0;">Vista dedicada al itinerario de este dia</div>
+        </div>
+        <button class="modal-close" id="planner-day-map-close">&#x2715;</button>
+      </div>
+      <div class="modal-body planner-day-map-modal-body">
+        <div class="planner-day-map-modal-layout">
+          <aside class="planner-day-map-modal-sidebar">
+            ${statusText ? `<div class="walking-route-status walking-route-status-${_walkingRouteMessageTone}">${statusText}</div>` : ''}
+            ${renderWalkingRouteSummary(model)}
+            ${renderDistanceSegmentsList(model, { day })}
+          </aside>
+          <div class="planner-day-map-modal-main">
+            <div class="planner-day-map-modal-actions">
+              <div class="planner-day-map-route-action">
+                ${renderGoogleMapsRouteButton(routeEntries, 'planner-day-modal-route')}
+              </div>
+              <div class="planner-day-map-api-actions ${isRouteActionDisabled ? 'is-disabled' : ''}">
+                <button type="button" class="walking-route-btn planner-day-map-action-btn" data-day-map-walking-route-action="calculate" ${isRouteActionDisabled ? 'disabled' : ''}>Calcular faltantes</button>
+                <button type="button" class="walking-route-btn walking-route-btn-secondary planner-day-map-action-btn" data-day-map-walking-route-action="refresh" ${isRouteActionDisabled ? 'disabled' : ''}>Actualizar ruta</button>
+              </div>
+            </div>
+            <div class="planner-day-map-modal-map-shell">
+            <div id="planner-day-map-modal-container" class="planner-map-container ${model.mappedCount === 0 ? 'is-hidden' : ''}"></div>
+            ${model.mappedCount === 0 ? '<div class="planner-map-empty">No hay actividades geolocalizadas para este dia.</div>' : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openPlannerDayMapModal(day, options = {}) {
+  const overlay = document.getElementById('planner-day-map-overlay');
+  const modal = document.getElementById('planner-day-map-modal');
+  if (!overlay || !modal) return;
+
+  const normalizedDay = Number.parseInt(day, 10);
+  if (!Number.isFinite(normalizedDay) || normalizedDay < 1 || normalizedDay > _totalTripDays) return;
+
+  _plannerDayMapModalDay = normalizedDay;
+  const model = getMapModelForDay(normalizedDay);
+  modal.innerHTML = renderPlannerDayMapOverlay(model, normalizedDay);
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  modal.querySelector('#planner-day-map-close')?.addEventListener('click', closePlannerDayMapModal);
+
+  destroyPlannerDayMapModal();
+  const mapContainer = document.getElementById('planner-day-map-modal-container');
+  if (!mapContainer || model.mappedCount === 0 || typeof L === 'undefined') return;
+
+  try {
+    _plannerDayMap = initLeafletMap('planner-day-map-modal-container', DEFAULT_MAP_CENTER, 5, {
+      controls: true,
+      showLocate: true,
+      showFullscreen: true,
+      showFitBounds: true
+    });
+
+    renderPlannerTravelMap(_plannerDayMap, model, {
+      categories,
+      priorityLabels,
+      citiesArray: _citiesArray,
+      formatScore,
+      mapLinkStyle: _globalSettings?.mapLinkStyle,
+      onPlaceClick: openPlaceModal
+    });
+
+    requestAnimationFrame(() => {
+      _plannerDayMap?.invalidateSize?.();
+    });
+  } catch (error) {
+    console.error('No se pudo renderizar el mapa diario del planner.', error);
+    mapContainer.insertAdjacentHTML('afterend', '<div class="planner-map-distance-warning">No se pudo cargar el mapa de este dia.</div>');
+  }
+
+  if (options.preserveOverlay !== true) {
+    requestAnimationFrame(() => {
+      _plannerDayMap?.invalidateSize?.();
+    });
+  }
+}
+
 function setMapScope(scope) {
   _selectedMapScope = normalizeMapScope(scope);
   if (_viewMode !== 'map') _viewMode = 'map';
@@ -2489,6 +3260,107 @@ function setMapScope(scope) {
   url.searchParams.set('view', 'map');
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   renderPlannerPage();
+}
+
+function getCurrentMapModel() {
+  const filteredPlaces = getFilteredPlannerPlaces();
+  const groups = buildGroupedData(filteredPlaces);
+  _selectedMapScope = normalizeMapScope(_selectedMapScope);
+  return buildMapModel(_selectedMapScope, groups);
+}
+
+function getMapModelForDay(day) {
+  const filteredPlaces = getFilteredPlannerPlaces();
+  const groups = buildGroupedData(filteredPlaces);
+  return buildMapModel(day, groups);
+}
+
+function clearStaleDays(days) {
+  days.forEach((day) => _walkingRouteStaleDays.delete(day));
+}
+
+function markWalkingRoutesAsStale(days) {
+  const validDays = days.filter((day) => Number.isFinite(day) && day >= 1 && day <= _totalTripDays);
+  if (!validDays.length) return;
+  validDays.forEach((day) => _walkingRouteStaleDays.add(day));
+  _walkingRouteMessage = 'Rutas pendientes de actualizar';
+  _walkingRouteMessageTone = 'stale';
+}
+
+async function calculateWalkingRoutesForCurrentScope(options = {}) {
+  return calculateWalkingRoutesForModel(getCurrentMapModel(), options);
+}
+
+async function calculateWalkingRoutesForModel(model, options = {}) {
+  if (_walkingRoutesLoading) return;
+
+  const forceRefresh = options.forceRefresh === true;
+  const calculableRoutes = model.routes.filter((route) => (route.allEntries || []).length >= 2);
+  const routeValidation = getRouteValidationModel(model);
+
+  if (!calculableRoutes.length) {
+    _walkingRouteMessage = 'No hay suficientes actividades con coordenadas';
+    _walkingRouteMessageTone = 'info';
+    renderPlannerPage();
+    if (_plannerDayMapModalDay) openPlannerDayMapModal(_plannerDayMapModalDay, { preserveOverlay: true });
+    showToast(_walkingRouteMessage, 'info');
+    return;
+  }
+
+  if (!routeValidation.canCalculate) {
+    _walkingRouteMessage = routeValidation.unvalidatedDays.length === 1
+      ? `Valida la ruta del día ${routeValidation.unvalidatedDays[0]} antes de calcular.`
+      : 'Valida las rutas de los días antes de calcular.';
+    _walkingRouteMessageTone = 'info';
+    renderPlannerPage();
+    if (_plannerDayMapModalDay) openPlannerDayMapModal(_plannerDayMapModalDay, { preserveOverlay: true });
+    showToast(_walkingRouteMessage, 'info');
+    return;
+  }
+
+  if (forceRefresh && model.walking?.segments?.length > 1 && hasOnlyCalculatedWalkingSegments(model)) {
+    const shouldRefresh = await confirmWalkingRouteRefresh(model);
+    if (!shouldRefresh) return;
+  }
+
+  _walkingRoutesLoading = true;
+  _walkingRouteMessage = 'Calculando rutas a pie...';
+  _walkingRouteMessageTone = 'loading';
+  renderPlannerPage();
+  if (_plannerDayMapModalDay) openPlannerDayMapModal(_plannerDayMapModalDay, { preserveOverlay: true });
+
+  const results = [];
+  for (const route of calculableRoutes) {
+    const routeResults = await getWalkingRoutesForEntries(route.allEntries, { forceRefresh });
+    results.push(...routeResults);
+    routeResults.forEach((segment) => {
+      _walkingRouteResults.set(segment.route.id, segment.route);
+    });
+  }
+
+  const okCount = results.filter((segment) => segment.route.status === 'ok').length;
+  const errorCount = results.filter((segment) => segment.route.status === 'error').length;
+  const missingCount = results.filter((segment) => segment.route.status === 'missing-coordinates').length;
+
+  clearStaleDays(model.selectedDays);
+  _walkingRoutesLoading = false;
+
+  if (okCount > 0 && errorCount === 0 && missingCount === 0) {
+    _walkingRouteMessage = 'Rutas actualizadas';
+    _walkingRouteMessageTone = 'ok';
+    showToast('Rutas a pie actualizadas.');
+  } else if (okCount > 0) {
+    _walkingRouteMessage = 'Algunas rutas no se han podido calcular';
+    _walkingRouteMessageTone = 'partial';
+    showToast(_walkingRouteMessage, 'info');
+  } else {
+    _walkingRouteMessage = 'No se han podido calcular rutas a pie';
+    _walkingRouteMessageTone = 'error';
+    showToast(_walkingRouteMessage, 'info');
+  }
+
+  renderPlannerPage();
+  if (_plannerDayMapModalDay) openPlannerDayMapModal(_plannerDayMapModalDay, { preserveOverlay: true });
 }
 
 function getZoneFromElement(el) {
@@ -2528,6 +3400,12 @@ async function handleDropEnd(evt) {
     return;
   }
 
+  if (isNoopPlannerDrop(evt)) {
+    renderPlannerPage();
+    showToast(getNoopDropToastMessage(evt), 'info');
+    return;
+  }
+
   const updates = collectPlannerUpdatesFromDOM();
   if (updates.length === 0) {
     renderPlannerPage();
@@ -2535,6 +3413,10 @@ async function handleDropEnd(evt) {
   }
 
   const toastMessage = getDropToastMessage(evt);
+  const affectedDays = [
+    Number.parseInt(evt.from?.closest('.planner-day-block')?.dataset.day || '', 10),
+    Number.parseInt(evt.to?.closest('.planner-day-block')?.dataset.day || '', 10)
+  ];
 
   updates.forEach((update) => {
     const existing = _plannerItems.find((item) => item.placeId === update.placeId);
@@ -2548,6 +3430,7 @@ async function handleDropEnd(evt) {
   });
 
   await putAll('planner', updates);
+  markWalkingRoutesAsStale(affectedDays);
   renderPlannerPage();
   showToast(toastMessage);
 }
@@ -2566,6 +3449,7 @@ function initSortable() {
       fallbackOnBody: true,
       swapThreshold: 0.65,
       group: { name: 'planner-shared', pull: true, put: true },
+      draggable: '.planner-mini-card',
       sort: true,
       filter: '.planner-chip-trigger, .planner-card-discarded',
       onEnd: handleDropEnd
@@ -2585,6 +3469,7 @@ function initSortable() {
       fallbackOnBody: true,
       swapThreshold: 0.65,
       group: { name: 'planner-shared', pull: true, put: true },
+      draggable: '.planner-mini-card',
       sort: true,
       filter: '.planner-chip-trigger, .planner-card-discarded',
       onEnd: handleDropEnd
@@ -2595,6 +3480,7 @@ function initSortable() {
 async function setPlannerState(placeId, newStatus, assignedDay) {
   const toastMessage = getStateToastMessage(placeId, newStatus, assignedDay);
   let item = _plannerItems.find((p) => p.placeId === placeId);
+  const previousDay = Number.parseInt(item?.assignedDay || '', 10);
   if (!item) {
     item = { placeId, status: newStatus, assignedDay, order: 0 };
     _plannerItems.push(item);
@@ -2604,6 +3490,7 @@ async function setPlannerState(placeId, newStatus, assignedDay) {
   }
 
   await putAll('planner', [item]);
+  markWalkingRoutesAsStale([previousDay, assignedDay]);
   closePlaceModal();
   renderPlannerPage();
   showToast(toastMessage);
@@ -2615,10 +3502,55 @@ function handlePageClick(e) {
     return;
   }
 
+  const dayCollapseBtn = e.target.closest('[data-planner-day-collapse]');
+  if (dayCollapseBtn) {
+    e.preventDefault();
+    const day = dayCollapseBtn.dataset.plannerDayCollapse;
+    setPlannerDayCollapsed(day, !isPlannerDayCollapsed(day));
+    renderPlannerPage();
+    return;
+  }
+
+  const daysCollapseBtn = e.target.closest('[data-planner-days-collapse]');
+  if (daysCollapseBtn) {
+    e.preventDefault();
+    setAllPlannerDaysCollapsed(daysCollapseBtn.dataset.plannerDaysCollapse === 'collapse');
+    renderPlannerPage();
+    showToast(daysCollapseBtn.dataset.plannerDaysCollapse === 'collapse'
+      ? 'Días contraídos.'
+      : 'Días expandidos.', 'info');
+    return;
+  }
+
+  const dayMapBtn = e.target.closest('[data-day-map-open]');
+  if (dayMapBtn) {
+    e.preventDefault();
+    openPlannerDayMapModal(dayMapBtn.dataset.dayMapOpen);
+    return;
+  }
+
   const mapScopeBtn = e.target.closest('[data-map-scope]');
   if (mapScopeBtn) {
     e.preventDefault();
     setMapScope(mapScopeBtn.dataset.mapScope);
+    return;
+  }
+
+  const walkingRouteBtn = e.target.closest('[data-walking-route-action]');
+  if (walkingRouteBtn) {
+    e.preventDefault();
+    calculateWalkingRoutesForCurrentScope({
+      forceRefresh: walkingRouteBtn.dataset.walkingRouteAction === 'refresh'
+    });
+    return;
+  }
+
+  const dayMapWalkingRouteBtn = e.target.closest('[data-day-map-walking-route-action]');
+  if (dayMapWalkingRouteBtn && _plannerDayMapModalDay) {
+    e.preventDefault();
+    calculateWalkingRoutesForModel(getMapModelForDay(_plannerDayMapModalDay), {
+      forceRefresh: dayMapWalkingRouteBtn.dataset.dayMapWalkingRouteAction === 'refresh'
+    });
     return;
   }
 
@@ -2670,10 +3602,29 @@ function handlePageClick(e) {
   const exportOverlay = e.target.closest('#planner-export-overlay');
   if (exportOverlay && !e.target.closest('#planner-export-modal')) {
     closePlannerExportModal();
+    return;
+  }
+
+  const dayMapOverlay = e.target.closest('#planner-day-map-overlay');
+  if (dayMapOverlay && !e.target.closest('#planner-day-map-modal')) {
+    closePlannerDayMapModal();
   }
 }
 
 function handlePageChange(e) {
+  const routeValidationInput = e.target.closest('[data-route-validation-day]');
+  if (routeValidationInput && !routeValidationInput.disabled) {
+    const day = routeValidationInput.dataset.routeValidationDay;
+    setRouteDayValidated(day, routeValidationInput.checked);
+    const toastMessage = routeValidationInput.checked
+      ? `Ruta del día ${day} validada para calcular.`
+      : `Validación retirada del día ${day}.`;
+    renderPlannerPage();
+    if (_plannerDayMapModalDay) openPlannerDayMapModal(_plannerDayMapModalDay, { preserveOverlay: true });
+    showToast(toastMessage, 'info');
+    return;
+  }
+
   if (e.target.classList.contains('planner-day-select') && e.target.value) {
     closeDropdown();
     setPlannerState(e.target.dataset.id, 'planned', Number.parseInt(e.target.value, 10));
