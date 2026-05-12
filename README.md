@@ -10,6 +10,12 @@ Versión publicada en GitHub Pages:
 
 https://bernatduran.github.io/
 
+## Estado de esta rama
+
+Esta rama `beta-public` mantiene una beta pública congelada para compartir la interfaz y la experiencia general de la app sin backend privado, sin login y sin acceso a APIs reales de rutas.
+
+El desarrollo activo de la versión privada debe continuar fuera de esta rama.
+
 ## Qué permite hacer
 
 - Consultar una portada general del viaje con resumen, fechas, ciudades y accesos principales.
@@ -188,9 +194,11 @@ El repositorio usa GitHub Actions:
 - `.github/workflows/ci.yml`: validación de build.
 - `.github/workflows/deploy.yml`: despliegue a GitHub Pages.
 
-Cada cambio subido a `main` puede generar una nueva versión publicada en:
+La beta pública publicada en GitHub Pages se despliega desde `beta-public`:
 
 https://bernatduran.github.io/
+
+La rama `main` queda libre para el desarrollo de la versión privada y no debería afectar a la beta pública.
 
 ## Estado del proyecto
 
