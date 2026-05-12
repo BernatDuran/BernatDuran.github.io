@@ -2,35 +2,13 @@ const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoute
 const FIELD_MASK = 'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline';
 const WALKING_MODE = 'walking';
 
-function jsonResponse(payload, status = 200, extraHeaders = {}) {
+function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
-      'content-type': 'application/json; charset=UTF-8',
-      ...extraHeaders
+      'content-type': 'application/json; charset=UTF-8'
     }
   });
-}
-
-function buildAllowedOrigins(env) {
-  return [env.ALLOWED_ORIGIN, env.LOCAL_ALLOWED_ORIGIN].filter(Boolean);
-}
-
-function buildCorsHeaders(request, env) {
-  const origin = request.headers.get('Origin');
-  const allowedOrigins = buildAllowedOrigins(env);
-  const headers = {
-    Vary: 'Origin'
-  };
-
-  if (origin && allowedOrigins.includes(origin)) {
-    headers['Access-Control-Allow-Origin'] = origin;
-  }
-
-  headers['Access-Control-Allow-Methods'] = 'GET,OPTIONS';
-  headers['Access-Control-Allow-Headers'] = 'Content-Type';
-  headers['Access-Control-Max-Age'] = '86400';
-  return headers;
 }
 
 function parseCoordinate(value, label) {
@@ -59,11 +37,6 @@ function parseDurationSeconds(duration) {
   const match = duration.match(/^([0-9]+(?:\.[0-9]+)?)s$/);
   if (!match) return null;
   return Math.round(Number.parseFloat(match[1]));
-}
-
-function getRoutePathname(url) {
-  const normalized = url.pathname.replace(/\/+$/, '');
-  return normalized || '/';
 }
 
 function getValidatedParams(url, env) {
@@ -128,17 +101,13 @@ function buildGoogleRequestBody(params, env) {
 
 async function handleRouteRequest(request, env) {
   if (!env.GOOGLE_ROUTES_API_KEY) {
-    return jsonResponse(
-      { error: 'El Worker no tiene configurada la API key de Google Routes.' },
-      500,
-      buildCorsHeaders(request, env)
-    );
+    return jsonResponse({ error: 'Cloudflare Pages no tiene configurada la API key de Google Routes.' }, 500);
   }
 
   const url = new URL(request.url);
   const validated = getValidatedParams(url, env);
   if (validated.error) {
-    return jsonResponse({ error: validated.error }, 400, buildCorsHeaders(request, env));
+    return jsonResponse({ error: validated.error }, 400);
   }
 
   const upstreamResponse = await fetch(ROUTES_API_URL, {
@@ -154,8 +123,7 @@ async function handleRouteRequest(request, env) {
   if (!upstreamResponse.ok) {
     return jsonResponse(
       { error: 'Google Routes no ha podido calcular la ruta.' },
-      upstreamResponse.status >= 400 && upstreamResponse.status < 500 ? 502 : 500,
-      buildCorsHeaders(request, env)
+      upstreamResponse.status >= 400 && upstreamResponse.status < 500 ? 502 : 500
     );
   }
 
@@ -166,61 +134,31 @@ async function handleRouteRequest(request, env) {
   const encodedPolyline = route?.polyline?.encodedPolyline || null;
 
   if (!route || durationSeconds == null || distanceMeters == null || !encodedPolyline) {
-    return jsonResponse(
-      { error: 'La respuesta de Google Routes no contiene todos los campos esperados.' },
-      502,
-      buildCorsHeaders(request, env)
-    );
+    return jsonResponse({ error: 'La respuesta de Google Routes no contiene todos los campos esperados.' }, 502);
   }
 
-  return jsonResponse(
-    {
-      mode: WALKING_MODE,
-      durationSeconds,
-      distanceMeters,
-      encodedPolyline
-    },
-    200,
-    buildCorsHeaders(request, env)
-  );
+  return jsonResponse({
+    mode: WALKING_MODE,
+    durationSeconds,
+    distanceMeters,
+    encodedPolyline
+  });
 }
 
-export default {
-  async fetch(request, env) {
-    const corsHeaders = buildCorsHeaders(request, env);
-    const url = new URL(request.url);
-    const pathname = getRoutePathname(url);
+export async function onRequest(context) {
+  const { request, env } = context;
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders
-      });
-    }
-
-    if (pathname === '/route') {
-      if (request.method !== 'GET') {
-        return jsonResponse({ error: 'Metodo no permitido.' }, 405, corsHeaders);
-      }
-
-      try {
-        return await handleRouteRequest(request, env);
-      } catch {
-        return jsonResponse({ error: 'Error interno al calcular la ruta.' }, 500, corsHeaders);
-      }
-    }
-
-    if (pathname === '/') {
-      return jsonResponse(
-        {
-          service: 'japan-routes-proxy',
-          status: 'ok'
-        },
-        200,
-        corsHeaders
-      );
-    }
-
-    return jsonResponse({ error: 'Not found.' }, 404, corsHeaders);
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204 });
   }
-};
+
+  if (request.method !== 'GET') {
+    return jsonResponse({ error: 'Metodo no permitido.' }, 405);
+  }
+
+  try {
+    return await handleRouteRequest(request, env);
+  } catch {
+    return jsonResponse({ error: 'Error interno al calcular la ruta.' }, 500);
+  }
+}

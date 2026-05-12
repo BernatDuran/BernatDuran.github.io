@@ -34,11 +34,11 @@ function buildRouteError(originPlace, destinationPlace, status, message) {
 }
 
 function getRoutesProxyUrl() {
-  return import.meta.env.VITE_ROUTES_PROXY_URL?.replace(/\/+$/, '') || '';
+  return import.meta.env.VITE_ROUTES_PROXY_URL?.replace(/\/+$/, '') || '/api';
 }
 
 function buildRouteUrl(proxyUrl, originLatLng, destinationLatLng) {
-  const url = new URL(`${proxyUrl}/route`);
+  const url = new URL(`${proxyUrl}/route`, window.location.origin);
   url.searchParams.set('mode', 'walking');
   url.searchParams.set('fromLat', String(originLatLng.lat));
   url.searchParams.set('fromLng', String(originLatLng.lng));
@@ -78,12 +78,6 @@ export async function getWalkingRouteBetweenPlaces(originPlace, destinationPlace
   }
 
   const proxyUrl = getRoutesProxyUrl();
-  if (!proxyUrl) {
-    const route = buildRouteError(originPlace, destinationPlace, 'error', 'Falta VITE_ROUTES_PROXY_URL');
-    options.onRouteError?.(route);
-    return route;
-  }
-
   const { signal, timeoutId } = withTimeout(options.signal);
 
   try {

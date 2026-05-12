@@ -15,7 +15,7 @@ dist-ssr
 .dev.vars
 .dev.vars.*
 *.local
-worker/.wrangler/
+.wrangler/
 
 # Editor directories and files
 .vscode/*

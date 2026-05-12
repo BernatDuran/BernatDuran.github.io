@@ -290,3 +290,15 @@ git push origin main
 ## Decisión final
 
 La rama `main` pasa a ser la base de la app real privada. La beta pública queda aislada en `beta-public` y no bloquea la evolución del producto.
+
+## Actualizacion aplicada
+
+La rama consolidada ya se ha fusionado en `main` mediante fast-forward.
+
+Ademas, la integracion de rutas reales se ha movido al endpoint same-origin de Cloudflare Pages:
+
+```txt
+/api/route
+```
+
+Esto sustituye al Worker separado como arquitectura recomendada. La API key de Google debe configurarse como secreto de Cloudflare Pages (`GOOGLE_ROUTES_API_KEY`) y la app privada debe protegerse con Cloudflare Access.

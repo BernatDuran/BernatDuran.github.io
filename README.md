@@ -118,6 +118,7 @@ Desde `/admin` se pueden cargar datos de ejemplo o limpiar datos operativos cuan
 - XLSX
 - jsPDF/html2canvas para exportación visual
 - vite-plugin-pwa
+- Cloudflare Pages Functions para rutas a pie reales en `/api/route`
 - GitHub Actions
 - GitHub Pages
 
@@ -180,6 +181,19 @@ npm run preview
 ```
 
 La salida de producción se genera en `dist/`.
+
+## Rutas a pie reales
+
+La app privada usa una Cloudflare Pages Function en `functions/api/route.js` para calcular rutas a pie con Google Routes API sin exponer la API key en el navegador.
+
+Configuración necesaria en Cloudflare Pages:
+
+- `GOOGLE_ROUTES_API_KEY`: secreto con la API key de Google Routes.
+- `DEFAULT_ROUTE_MODE`: `walking`.
+- `DEFAULT_LANGUAGE`: `es`.
+- `DEFAULT_UNITS`: `METRIC`.
+
+El frontend llama por defecto al endpoint same-origin `/api/route`. Para pruebas avanzadas se puede sobrescribir con `VITE_ROUTES_PROXY_URL`, pero producción debería usar `/api`.
 
 ## CI/CD y despliegue
 

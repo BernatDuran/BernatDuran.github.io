@@ -50,7 +50,7 @@ Situacion actual del repo:
 - `main` no contiene la nueva capa de rutas reales.
 - `feature/walking-real-routes` tampoco la contiene en Git como historial consolidado.
 - El trabajo avanzado existe en el working tree local.
-- Hay archivos nuevos y cambios grandes en planner, city, mapas, estilos, rutas y worker.
+- Hay archivos nuevos y cambios grandes en planner, city, mapas, estilos, rutas y funciones de Cloudflare Pages.
 - `beta-public` ya esta separada y no debe tocarse durante esta fase.
 
 ## Implicacion importante
@@ -71,7 +71,7 @@ Esta fase debe consolidar, como minimo, estas areas:
 - Modal de mapa diario y validacion de rutas.
 - Cambios de estilos asociados.
 - Utilidades nuevas en `src/utils/routes/`.
-- Worker actual de rutas.
+- Endpoint actual de rutas en `functions/api/route.js`.
 - Documentacion necesaria para entender la pieza.
 
 Esta fase **no** deberia hacer todavia:
@@ -99,7 +99,7 @@ En lugar de mezclar consolidacion, limpieza, merge y despliegue a la vez, se deb
 
 - No usar `git reset --hard`.
 - No usar `git stash` como solucion principal si el trabajo es importante.
-- No mezclar en un mismo commit cambios de producto, estilos, worker, docs y seguridad si se pueden separar.
+- No mezclar en un mismo commit cambios de producto, estilos, API, docs y seguridad si se pueden separar.
 - No empujar a `main` hasta tener un build verde y una lectura clara del diff.
 
 ---
@@ -184,7 +184,7 @@ Separar mentalmente o en una nota temporal:
 - Producto UX/UI.
 - Planner y logica de negocio.
 - Rutas reales walking.
-- Infraestructura `worker/`.
+- Infraestructura `functions/api/route.js`.
 - Dependencias `package.json` y `package-lock.json`.
 - Documentacion.
 
@@ -195,7 +195,7 @@ Revisar especificamente:
 - `.env.local`
 - referencias a `VITE_ROUTES_PROXY_URL`
 - referencias a `GOOGLE_ROUTES_API_KEY`
-- configuraciones de `worker/`
+- configuraciones de Cloudflare Pages Functions
 - cualquier URL privada, secreto o token
 
 ### 4. Detectar cambios que no deberian entrar todavia
@@ -241,14 +241,14 @@ Incluye:
 
 Incluye:
 
-- `worker/`;
+- `functions/api/route.js`;
 - nueva configuracion de entorno;
 - documentacion de seguridad;
 - piezas ligadas a Cloudflare o proxy de rutas.
 
 ## Opinion practica
 
-Si el Worker actual todavia no representa la arquitectura final recomendada para produccion privada, conviene consolidarlo igualmente, pero dejando claro que es una pieza transitoria y no la solucion final de seguridad.
+La arquitectura recomendada para produccion privada es same-origin: `functions/api/route.js` expone `/api/route` dentro de Cloudflare Pages y queda protegido junto con la app por Cloudflare Access.
 
 ## Criterio de salida
 
@@ -296,7 +296,7 @@ Contenido esperado:
 Contenido esperado:
 
 - `src/utils/routes/`;
-- `worker/`;
+- `functions/api/route.js`;
 - dependencia nueva de polyline;
 - ajustes tecnicos asociados.
 
@@ -395,14 +395,14 @@ Confirmar que:
 
 - la API key no esta en el frontend;
 - el frontend no embebe secretos;
-- el worker no contiene claves hardcodeadas.
+- la Pages Function no contiene claves hardcodeadas.
 
-### 3. Estado del Worker
+### 3. Estado del endpoint de rutas
 
 Preguntas que deben quedar respondidas:
 
 - ¿Es util para desarrollo y pruebas actuales?
-- ¿Es transitorio hasta moverlo a Pages Functions same-origin?
+- ¿Esta desplegado como Pages Function same-origin?
 - ¿Se documenta claramente esa situacion?
 
 ### 4. Riesgo de consumo API
@@ -442,8 +442,8 @@ Explicar:
 Explicar:
 
 - como funciona el flujo actual de rutas;
-- que papel tiene el Worker;
-- que la arquitectura recomendada final sigue siendo Cloudflare Pages + Access + endpoint protegido.
+- que papel tiene `functions/api/route.js`;
+- que la arquitectura recomendada final sigue siendo Cloudflare Pages + Access + endpoint same-origin protegido.
 
 ### 3. Estado para la siguiente fase
 
@@ -503,7 +503,7 @@ git commit -m "Refine city map toggle and scroll behavior"
 git add <bloque-2>
 git commit -m "Enhance planner with walking route workflow"
 git add <bloque-3>
-git commit -m "Add walking routes infrastructure worker"
+git commit -m "Add same-origin walking routes API"
 npm run build
 git status
 ```
@@ -542,7 +542,7 @@ Despues:
 | Hay commits legibles | Pendiente / OK |
 | `npm run build` funciona | Pendiente / OK |
 | No hay secretos commiteados | Pendiente / OK |
-| Se entiende el papel del Worker actual | Pendiente / OK |
+| Se entiende el papel de `/api/route` | Pendiente / OK |
 | `beta-public` sigue intacta | Pendiente / OK |
 | `main` sigue sin tocar hasta validar | Pendiente / OK |
 | La rama esta lista para decidir Fase 3 | Pendiente / OK |
