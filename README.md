@@ -166,6 +166,12 @@ http://localhost:5173/planner.html
 http://localhost:5173/admin.html
 ```
 
+## Configuración propia
+
+Si quieres clonar o desplegar tu propia instancia, revisa la guía pública:
+
+[Guía de configuración pública](docs/guia_configuracion_publica.md)
+
 ## Build
 
 Generar versión de producción:
