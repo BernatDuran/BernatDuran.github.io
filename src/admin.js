@@ -155,6 +155,65 @@ function openAdminConfirmModal({ title, message, confirmLabel, tone = 'danger', 
   });
 }
 
+function openAdminScopedClearModal({ title, message, confirmLabel, tone = 'danger', citiesArray = [], onConfirm }) {
+  const modalOverlay = document.getElementById('admin-modal-overlay');
+  const modal = document.getElementById('admin-modal');
+  if (!modalOverlay || !modal) return;
+
+  const confirmStyle = tone === 'danger'
+    ? 'background:#dc2626; color:#fff; border:none;'
+    : 'background:var(--accent); color:#fff; border:none;';
+  const cityOptions = sortCities(citiesArray)
+    .map((city) => `<option value="${city.id}">${city.name} (${city.id})</option>`)
+    .join('');
+
+  modal.innerHTML = `
+    <div class="modal-header admin-scoped-clear-header">
+      <div>
+        <span class="admin-modal-kicker">Acci&oacute;n destructiva</span>
+        <h2>${title}</h2>
+      </div>
+      <button class="modal-close" id="admin-modal-close" aria-label="Cerrar">&#x2715;</button>
+    </div>
+    <div class="modal-body admin-scoped-clear-body">
+      <p class="admin-scoped-clear-message">${message}</p>
+      <div class="form-group admin-scoped-clear-field">
+        <label for="admin-clear-scope">Alcance obligatorio</label>
+        <select id="admin-clear-scope" required>
+          <option value="" selected disabled>Selecciona el alcance...</option>
+          <option value="all">Todas las ciudades</option>
+          ${cityOptions}
+        </select>
+      </div>
+      <p id="admin-clear-scope-error" class="admin-scoped-clear-error">Selecciona todas las ciudades o una ciudad concreta para continuar.</p>
+      <div class="admin-scoped-clear-actions">
+        <button type="button" class="admin-scoped-clear-btn admin-scoped-clear-btn-secondary" id="admin-confirm-cancel">Cancelar</button>
+        <button type="button" class="admin-scoped-clear-btn admin-scoped-clear-btn-primary" id="admin-confirm-action" style="${confirmStyle}">${confirmLabel}</button>
+      </div>
+    </div>
+  `;
+
+  modalOverlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('admin-modal-close')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-confirm-cancel')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-confirm-action')?.addEventListener('click', async () => {
+    const scope = document.getElementById('admin-clear-scope')?.value || '';
+    const errorEl = document.getElementById('admin-clear-scope-error');
+    if (!scope) {
+      if (errorEl) errorEl.style.display = 'block';
+      return;
+    }
+
+    try {
+      closeAdminModal();
+      await onConfirm(scope);
+    } catch (error) {
+      showAdminToast(`No se pudo completar la accion: ${error.message}`, 'error');
+    }
+  });
+}
+
 function normalizeImportBoolean(value) {
   if (value === '' || value == null) return false;
   if (typeof value === 'boolean') return value;
@@ -539,10 +598,10 @@ async function render() {
     </div>
   `;
 
-  attachEvents();
+  attachEvents(citiesArray);
 }
 
-function attachEvents() {
+function attachEvents(citiesArray = []) {
   // Color picker preview
   const colorInput = document.getElementById('city-color');
   const colorText = document.getElementById('color-preview-text');
@@ -832,27 +891,66 @@ function attachEvents() {
   });
 
   document.getElementById('btn-clear-planner')?.addEventListener('click', () => {
-    openAdminConfirmModal({
+    openAdminScopedClearModal({
       title: '&#x1F9F9; Limpiar planificador',
-      message: 'Esto eliminar&aacute; el estado del planificador: bandeja, d&iacute;as asignados, orden, realizadas y descartadas. Las ciudades y actividades se mantienen.',
-      confirmLabel: 'S&iacute;, limpiar planificador',
-      onConfirm: async () => {
+      message: 'Selecciona si quieres limpiar el estado del planificador de todas las ciudades o solo de una ciudad concreta. Las ciudades y actividades se mantienen.',
+      confirmLabel: 'Limpiar planificador',
+      citiesArray,
+      onConfirm: async (scope) => {
+        const plannerItems = await getAll('planner');
+        if (scope === 'all') {
+          await clear('planner');
+          showAdminToast(`Planificador limpiado correctamente (${plannerItems.length} registros eliminados).`);
+          render();
+          return;
+        }
+
+        const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+        const targetPlaceIds = new Set(places.filter((place) => place.cityId === scope).map((place) => place.id));
+        const remainingPlanner = plannerItems.filter((item) => !targetPlaceIds.has(item.placeId));
+        const removedCount = plannerItems.length - remainingPlanner.length;
+
         await clear('planner');
-        showAdminToast('Planificador limpiado correctamente.');
+        if (remainingPlanner.length) await putAll('planner', remainingPlanner.map((item) => normalizePlannerRecord(item)));
+
+        const cityName = citiesArray.find((city) => city.id === scope)?.name || scope;
+        showAdminToast(`Planificador de ${cityName} limpiado correctamente (${removedCount} registros eliminados).`);
         render();
       }
     });
   });
 
   document.getElementById('btn-clear-places')?.addEventListener('click', () => {
-    openAdminConfirmModal({
+    openAdminScopedClearModal({
       title: '&#x26A0;&#xFE0F; Limpiar actividades',
-      message: 'Esto eliminar&aacute; todas las actividades y tambi&eacute;n limpiar&aacute; el planificador para evitar referencias rotas. Las ciudades y ajustes se mantienen.',
-      confirmLabel: 'S&iacute;, limpiar actividades',
-      onConfirm: async () => {
+      message: 'Selecciona si quieres eliminar actividades de todas las ciudades o solo de una ciudad concreta. Tambi&eacute;n se eliminar&aacute; la planificaci&oacute;n asociada a esas actividades para evitar referencias rotas.',
+      confirmLabel: 'Limpiar actividades',
+      citiesArray,
+      onConfirm: async (scope) => {
+        const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+        const plannerItems = await getAll('planner');
+
+        if (scope === 'all') {
+          await clear('places');
+          await clear('planner');
+          showAdminToast(`Actividades y planificador limpiados correctamente (${places.length} actividades eliminadas).`);
+          render();
+          return;
+        }
+
+        const targetPlaces = places.filter((place) => place.cityId === scope);
+        const targetPlaceIds = new Set(targetPlaces.map((place) => place.id));
+        const remainingPlaces = places.filter((place) => place.cityId !== scope);
+        const remainingPlanner = plannerItems.filter((item) => !targetPlaceIds.has(item.placeId));
+        const removedPlannerCount = plannerItems.length - remainingPlanner.length;
+
         await clear('places');
         await clear('planner');
-        showAdminToast('Actividades y planificador limpiados correctamente.');
+        if (remainingPlaces.length) await putAll('places', remainingPlaces);
+        if (remainingPlanner.length) await putAll('planner', remainingPlanner.map((item) => normalizePlannerRecord(item)));
+
+        const cityName = citiesArray.find((city) => city.id === scope)?.name || scope;
+        showAdminToast(`Actividades de ${cityName} eliminadas (${targetPlaces.length}) y planificador asociado limpiado (${removedPlannerCount}).`);
         render();
       }
     });
