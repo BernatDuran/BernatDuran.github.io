@@ -1,4 +1,4 @@
-export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v2-trip-plan-2026-06-29';
+export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v3-local-activity-sync-2026-05-18';
 
 export const SCORE_OVERRIDES = {
   'tokyo-nakamise-dori': 8,
