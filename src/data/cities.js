@@ -1,7 +1,7 @@
 export const cities = {
   tokyo: {
     id: 'tokyo',
-    sortOrder: 0,
+    sortOrder: 3,
     name: 'Tokio',
     nameJa: '東京',
     slug: 'tokyo',
@@ -45,7 +45,7 @@ export const cities = {
   },
   osaka: {
     id: 'osaka',
-    sortOrder: 2,
+    sortOrder: 0,
     name: 'Osaka',
     nameJa: '大阪',
     slug: 'osaka',
@@ -67,7 +67,7 @@ export const cities = {
   },
   takayama: {
     id: 'takayama',
-    sortOrder: 3,
+    sortOrder: 2,
     name: 'Takayama',
     nameJa: '高山',
     slug: 'takayama',
