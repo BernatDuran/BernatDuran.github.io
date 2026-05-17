@@ -92,11 +92,11 @@ export const cities = {
 export const tripInfo = {
   title: 'Japón 2026',
   subtitle: 'La aventura definitiva',
-  dates: { start: '2026-06-30', end: '2026-07-16' },
-  datesFormatted: '30 junio — 16 julio 2026',
-  totalDays: 17,
+  dates: { start: '2026-06-29', end: '2026-07-16' },
+  datesFormatted: '29 junio — 16 julio 2026',
+  totalDays: 18,
   totalCities: 4,
-  description: '17 días descubriendo la esencia de Japón: desde los rascacielos de Tokio hasta los templos de Kioto, pasando por la gastronomía de Osaka y el Japón tradicional de montaña en Takayama.'
+  description: '18 días descubriendo la esencia de Japón: desde Osaka y Universal Studios Japan hasta los templos de Kioto, el Japón tradicional de montaña en Takayama y los barrios imprescindibles de Tokio.'
 };
 
 export const categories = [

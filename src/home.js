@@ -25,7 +25,7 @@ function render(citiesArray, allPlaces, globalSettings) {
   const plannerLink = `<a href="/planner.html" style="color:var(--accent); font-weight:bold;">&#x1F5D3;&#xFE0F; Planner</a>`;
   const cityLinks = citiesArray.map((city) => `<a href="/city.html?id=${city.id}">${city.name}</a>`).join('');
 
-  const startDateStr = globalSettings?.startDate || '2026-06-30';
+  const startDateStr = globalSettings?.startDate || '2026-06-29';
   const endDateStr = globalSettings?.endDate || '2026-07-16';
   const startDate = new Date(startDateStr);
   const endDate = new Date(endDateStr);

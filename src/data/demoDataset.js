@@ -2,6 +2,7 @@ import { cities } from './cities.js';
 import { tokyoPlaces } from './tokyo.js';
 import { kyotoPlaces } from './kyoto.js';
 import { osakaPlaces } from './osaka.js';
+import { takayamaPlaces } from './takayama.js';
 import {
   PROFESSIONAL_CURATION_VERSION,
   SCORE_OVERRIDES,
@@ -14,7 +15,7 @@ import { normalizePlaceRecord } from '../utils/placeData.js';
 
 export const DEMO_GLOBAL_SETTINGS = {
   id: 'global',
-  startDate: '2026-06-30',
+  startDate: '2026-06-29',
   endDate: '2026-07-16',
   mapLinkStyle: 'smart'
 };
@@ -24,7 +25,8 @@ export function buildDemoDataset() {
   const basePlaces = [
     ...tokyoPlaces.map((place) => normalizePlaceRecord({ ...place, cityId: 'tokyo' })),
     ...kyotoPlaces.map((place) => normalizePlaceRecord({ ...place, cityId: 'kyoto' })),
-    ...osakaPlaces.map((place) => normalizePlaceRecord({ ...place, cityId: 'osaka' }))
+    ...osakaPlaces.map((place) => normalizePlaceRecord({ ...place, cityId: 'osaka' })),
+    ...takayamaPlaces.map((place) => normalizePlaceRecord({ ...place, cityId: 'takayama' }))
   ];
 
   const rainyFriendlySet = new Set(RAINY_FRIENDLY_IDS);

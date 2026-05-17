@@ -59,7 +59,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   }
 
   let totalTripDays = 1;
-  let datesFormatted = '30 junio &mdash; 16 julio 2026';
+  let datesFormatted = '29 junio &mdash; 16 julio 2026';
   let tripStartDate = null;
   if (globalSettings && globalSettings.startDate && globalSettings.endDate) {
     const start = parseLocalDate(globalSettings.startDate);

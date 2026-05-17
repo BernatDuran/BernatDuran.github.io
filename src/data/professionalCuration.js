@@ -1,4 +1,4 @@
-export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v1';
+export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v2-trip-plan-2026-06-29';
 
 export const SCORE_OVERRIDES = {
   'tokyo-nakamise-dori': 8,
@@ -22,12 +22,19 @@ export const SCORE_OVERRIDES = {
   'osaka-bigman': 5,
   'osaka-tenmangu': 7,
   'osaka-goryo': 5,
+  'osaka-usj': 10,
   'osaka-ajinoya': 9,
   'osaka-tendon-makino': 8,
   'osaka-551-horai': 9,
   'osaka-yp-ryu': 8,
   'osaka-rikuro': 8,
-  'osaka-gorichan': 7
+  'osaka-gorichan': 7,
+  'takayama-sanmachi-suji': 10,
+  'takayama-miyagawa-market': 9,
+  'takayama-jinya': 9,
+  'takayama-hida-no-sato': 9,
+  'takayama-shirakawago-day-trip': 10,
+  'takayama-hida-beef': 9
 };
 
 export const RAINY_FRIENDLY_IDS = [
@@ -68,45 +75,51 @@ export const RAINY_FRIENDLY_IDS = [
   'osaka-551-horai',
   'osaka-yp-ryu',
   'osaka-rikuro',
-  'osaka-gorichan'
+  'osaka-gorichan',
+  'takayama-jinya',
+  'takayama-matsuri-yatai-kaikan',
+  'takayama-hida-beef',
+  'takayama-sake-breweries',
+  'takayama-ryokan-experience'
 ];
 
 export const PLANNED_DAY_IDS = {
   1: [
-    'tokyo-senso-ji',
-    'tokyo-nakamise-dori',
-    'tokyo-kappabashi',
-    'tokyo-skytree',
-    'tokyo-hoppy-street'
+    'osaka-namba-yasaka',
+    'osaka-shinsaibashi',
+    'osaka-hozenji',
+    'osaka-glico',
+    'osaka-dotonbori',
+    'osaka-ajinoya',
+    'osaka-rikuro'
   ],
   2: [
-    'tokyo-meiji-jingu',
-    'tokyo-takeshita',
-    'tokyo-shibuya-crossing',
-    'tokyo-mega-donki',
-    'tokyo-shibuya-sky'
+    'osaka-usj',
+    'osaka-umeda-sky',
+    'osaka-takimi-koji'
   ],
   3: [
-    'tokyo-shinjuku-gyoen',
-    'tokyo-metropolitan-govt',
-    'tokyo-omoide-yokocho',
-    'tokyo-golden-gai'
+    'osaka-castle',
+    'osaka-nishinomaru',
+    'osaka-kuromon',
+    'osaka-den-den',
+    'osaka-namba-parks'
   ],
   4: [
-    'tokyo-ueno-park',
-    'tokyo-yanaka'
+    'osaka-sumiyoshi',
+    'osaka-shitennoji',
+    'osaka-shinsekai',
+    'osaka-tsutenkaku',
+    'osaka-abeno-harukas'
   ],
   5: [
-    'tokyo-teamlab',
-    'tokyo-odaiba'
+    'osaka-nakazakicho',
+    'osaka-station-city',
+    'kyoto-nijo-castle',
+    'kyoto-nishiki',
+    'kyoto-pontocho'
   ],
   6: [
-    'tokyo-palacio-imperial',
-    'tokyo-akihabara',
-    'tokyo-super-potato',
-    'tokyo-bic-camera'
-  ],
-  7: [
     'kyoto-kiyomizu-dera',
     'kyoto-sannenzaka',
     'kyoto-hokanji',
@@ -115,69 +128,71 @@ export const PLANNED_DAY_IDS = {
     'kyoto-hanamikoji',
     'kyoto-yasaka-shrine'
   ],
-  8: [
-    'kyoto-ceremonia-te',
-    'kyoto-botigues',
-    'kyoto-nijo-castle',
-    'kyoto-nishiki',
-    'kyoto-pontocho'
-  ],
-  9: [
-    'kyoto-ginkakuji',
-    'kyoto-filosofia',
-    'kyoto-nanzenji',
-    'kyoto-eikando'
-  ],
-  10: [
-    'kyoto-kinkakuji',
-    'kyoto-ryoanji'
-  ],
-  11: [
-    'kyoto-bambu',
-    'kyoto-tenryuji',
-    'kyoto-togetsukyo'
-  ],
-  12: [
+  7: [
     'kyoto-fushimi-inari',
     'kyoto-ruta-torii',
     'kyoto-tofukuji',
     'kyoto-sake-district'
   ],
+  8: [
+    'kyoto-bambu',
+    'kyoto-tenryuji',
+    'kyoto-togetsukyo',
+    'kyoto-kinkakuji',
+    'kyoto-ryoanji'
+  ],
+  9: [
+    'takayama-sanmachi-suji',
+    'takayama-nakabashi-bridge',
+    'takayama-sake-breweries',
+    'takayama-hida-beef',
+    'takayama-ryokan-experience'
+  ],
+  10: [
+    'takayama-miyagawa-market',
+    'takayama-jinya-mae-market',
+    'takayama-jinya',
+    'takayama-hida-no-sato',
+    'takayama-shiroyama-park'
+  ],
+  11: [
+    'takayama-shirakawago-day-trip',
+    'takayama-matsuri-yatai-kaikan'
+  ],
+  12: [
+    'takayama-hida-furukawa-day-trip',
+    'tokyo-omoide-yokocho',
+    'tokyo-golden-gai'
+  ],
   13: [
-    'osaka-kuromon',
-    'osaka-namba-yasaka',
-    'osaka-den-den',
-    'osaka-namba-parks',
-    'osaka-shinsaibashi',
-    'osaka-551-horai',
-    'osaka-hozenji',
-    'osaka-glico',
-    'osaka-dotonbori',
-    'osaka-ajinoya',
-    'osaka-rikuro'
+    'tokyo-senso-ji',
+    'tokyo-nakamise-dori',
+    'tokyo-kappabashi',
+    'tokyo-skytree',
+    'tokyo-hoppy-street'
   ],
   14: [
-    'osaka-umeda-sky',
-    'osaka-station-city',
-    'osaka-hep-five',
-    'osaka-nakazakicho',
-    'osaka-takimi-koji'
+    'tokyo-meiji-jingu',
+    'tokyo-takeshita',
+    'tokyo-shibuya-crossing',
+    'tokyo-mega-donki',
+    'tokyo-shibuya-sky'
   ],
   15: [
-    'osaka-sumiyoshi',
-    'osaka-shitennoji',
-    'osaka-tsutenkaku',
-    'osaka-shinsekai',
-    'osaka-abeno-harukas'
+    'tokyo-ueno-park',
+    'tokyo-yanaka',
+    'tokyo-shinjuku-gyoen',
+    'tokyo-metropolitan-govt'
   ],
   16: [
-    'osaka-castle',
-    'osaka-nishinomaru',
-    'osaka-aquarium',
-    'osaka-tempozan'
+    'tokyo-teamlab',
+    'tokyo-odaiba'
   ],
   17: [
-    'osaka-usj'
+    'tokyo-palacio-imperial',
+    'tokyo-akihabara',
+    'tokyo-super-potato',
+    'tokyo-bic-camera'
   ]
 };
 

@@ -118,13 +118,15 @@ async function applyProfessionalCuration() {
   const favoriteByPlaceId = new Map(
     existingPlannerItems.map((item) => [item.placeId, Boolean(item.favorite)])
   );
+  const existingPlaceById = new Map(places.map((place) => [place.id, place]));
 
-  const curatedPlaces = places.map((place) => {
-    const demoPlace = demoPlaceById.get(place.id);
-    return demoPlace
-      ? { ...place, rainyFriendly: demoPlace.rainyFriendly, score: place.score ?? demoPlace.score }
-      : place;
-  });
+  const curatedPlaces = [
+    ...demoDataset.places.map((demoPlace) => ({
+      ...(existingPlaceById.get(demoPlace.id) || {}),
+      ...demoPlace
+    })),
+    ...places.filter((place) => !demoPlaceById.has(place.id))
+  ];
   const existingIds = new Set(curatedPlaces.map((place) => place.id));
   const planner = demoDataset.planner
     .filter((item) => existingIds.has(item.placeId))
@@ -132,8 +134,26 @@ async function applyProfessionalCuration() {
       ...item,
       favorite: favoriteByPlaceId.get(item.placeId) || false
     }));
+  const plannedDemoIds = new Set(planner.map((item) => item.placeId));
+  const customPlanner = existingPlannerItems
+    .filter((item) => existingIds.has(item.placeId) && !plannedDemoIds.has(item.placeId))
+    .map((item) => ({
+      placeId: item.placeId,
+      favorite: Boolean(item.favorite),
+      status: item.status || 'in-tray',
+      assignedDay: item.status === 'planned' ? item.assignedDay : null,
+      order: item.order || 0
+    }));
+  const currentGlobalSettings = await getById('settings', 'global');
+  const nextGlobalSettings = {
+    ...demoDataset.settings.find((setting) => setting.id === 'global'),
+    mapLinkStyle: currentGlobalSettings?.mapLinkStyle || 'smart'
+  };
 
   await putAll('places', curatedPlaces);
-  await putAll('planner', planner);
-  await putAll('settings', [{ id: PROFESSIONAL_CURATION_VERSION, appliedAt: new Date().toISOString() }]);
+  await putAll('planner', [...planner, ...customPlanner]);
+  await putAll('settings', [
+    nextGlobalSettings,
+    { id: PROFESSIONAL_CURATION_VERSION, appliedAt: new Date().toISOString() }
+  ]);
 }
