@@ -4,15 +4,9 @@ import {
   setCachedWalkingRoute
 } from './routeCache.js';
 import { normalizeRouteResponse } from './routeFormatters.js';
+import { getPlaceLatLng } from '../placeData.js';
 
 const ROUTE_TIMEOUT_MS = 12000;
-
-function getPlaceLatLng(place) {
-  const lat = Number(place?.lat);
-  const lng = Number(place?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
-}
 
 function buildRouteError(originPlace, destinationPlace, status, message) {
   return {

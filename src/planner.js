@@ -10,7 +10,7 @@ import { setupPwa } from './utils/pwa.js';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
 import { sortCities } from './utils/cityData.js';
-import { formatBestTimeLabel, normalizePlaceRecord } from './utils/placeData.js';
+import { formatBestTimeLabel, getPlaceLatLng, normalizePlaceRecord } from './utils/placeData.js';
 import { runDataMigration } from './utils/dataMigration.js';
 import { renderPlaceDetailModal } from './utils/placeDetailModal.js';
 import { buildWalkingRouteCacheKey, getCachedWalkingRoute } from './utils/routes/routeCache.js';
@@ -289,13 +289,6 @@ function normalizeMapScope(scope) {
 
 function getDayColor(day) {
   return DAY_ROUTE_COLORS[(day - 1) % DAY_ROUTE_COLORS.length];
-}
-
-function getPlaceLatLng(place) {
-  const lat = Number(place?.lat);
-  const lng = Number(place?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
 }
 
 function hasValidCoordinates(place) {
