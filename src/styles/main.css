@@ -45,6 +45,9 @@ input, select { font-family: inherit; font-size: inherit; }
   --osaka: #ef4444;
   --osaka-light: #fee2e2;
   --osaka-dark: #7f1d1d;
+  --takayama: #059669;
+  --takayama-light: #d1fae5;
+  --takayama-dark: #064e3b;
 
   /* Priority Colors */
   --must-see: #ef4444;

@@ -4,35 +4,77 @@ import './styles/pages.css';
 import { getAll, getById, putAll, clear } from './utils/db.js';
 import Sortable from 'sortablejs';
 import { icons } from './utils/helpers.js';
-import { runDataMigration } from './utils/dataMigration.js';
+import { ensureBaseCitiesExist, runDataMigration } from './utils/dataMigration.js';
 import { normalizePlaceRecord, PLACE_IMPORT_EXPORT_FIELDS, toImportExportRow } from './utils/placeData.js';
 import { formatRecommendedDays, normalizeCityRecord, sortCities } from './utils/cityData.js';
+import { categories, priorityLabels } from './data/cities.js';
 import { buildDemoDataset } from './data/demoDataset.js';
 import * as XLSX from 'xlsx';
 
 const app = document.getElementById('app');
-const PLACE_FIELD_HELP = [
-  '<li><strong>id</strong>: (Texto) Identificador unico en minusculas sin espacios.</li>',
-  '<li><strong>name</strong>: (Texto) Nombre del lugar.</li>',
-  '<li><strong>cityId</strong>: (Texto) ID de la ciudad, por ejemplo <code>tokyo</code>.</li>',
-  '<li><strong>category</strong>: (Texto) Categoria funcional de la actividad.</li>',
-  '<li><strong>type</strong>: (Texto) Tipo descriptivo, por ejemplo <code>Templo</code>.</li>',
-  '<li><strong>priority</strong>: (Texto) <code>must-see</code>, <code>recommended</code> u <code>optional</code>.</li>',
-  '<li><strong>zone</strong>: (Texto) Barrio o zona.</li>',
-  '<li><strong>description</strong>: (Texto) Descripcion principal.</li>',
-  '<li><strong>address</strong>: (Texto) Direccion legible para el usuario.</li>',
-  '<li><strong>lat / lng</strong>: (Numero) Coordenadas decimales usando punto.</li>',
-  '<li><strong>estimatedDuration</strong>: (Texto) Duracion estimada.</li>',
-  '<li><strong>bestTime</strong>: (Opción) <code>mañana</code>, <code>tarde</code>, <code>noche</code> o <code>cualquier-momento</code>.</li>',
-  '<li><strong>rainyFriendly</strong>: (Booleano) <code>true</code>/<code>false</code> o <code>1</code>/<code>0</code>.</li>',
-  '<li><strong>score</strong>: (Numero) Puntuacion unica del chat, de 1 a 10.</li>',
-  '<li><strong>requiresTicket</strong>: (Booleano) Si necesita entrada de pago o reserva.</li>',
-  '<li><strong>ticketInfo</strong>: (Texto) Precio o aclaracion sobre la entrada.</li>',
-  '<li><strong>tips</strong>: (Texto) Consejos practicos.</li>',
-  '<li><strong>comment</strong>: (Texto) Nota personal.</li>',
-  
-].join('');
-const PLANNER_IMPORT_EXPORT_FIELDS = ['placeId', 'favorite', 'status', 'assignedDay', 'order'];
+const PLANNER_IMPORT_EXPORT_FIELDS = ['placeId', 'cityId', 'favorite', 'status', 'assignedDay', 'order'];
+const PLANNER_STATUS_VALUES = ['in-tray', 'planned', 'done', 'discarded'];
+const CITY_ID_PATTERN = /^[a-z0-9-]+$/;
+
+function getCityIdList(citiesArray = []) {
+  return sortCities(citiesArray).map((city) => city.id).filter(Boolean);
+}
+
+function formatInlineCodeList(values) {
+  return values.map((value) => `<code>${value}</code>`).join(', ');
+}
+
+function buildExactPlaceHeaderMessage() {
+  return `Cabeceras obligatorias y en este orden exacto: ${PLACE_IMPORT_EXPORT_FIELDS.join(', ')}`;
+}
+
+function validateExactPlaceWorkbookHeaders(rows = []) {
+  const headers = Object.keys(rows[0] || {});
+  const extraHeaders = headers.filter((header) => !PLACE_IMPORT_EXPORT_FIELDS.includes(header));
+  const missingHeaders = PLACE_IMPORT_EXPORT_FIELDS.filter((field) => !headers.includes(field));
+  const orderedCorrectly = headers.length === PLACE_IMPORT_EXPORT_FIELDS.length
+    && PLACE_IMPORT_EXPORT_FIELDS.every((field, index) => headers[index] === field);
+
+  if (!extraHeaders.length && !missingHeaders.length && orderedCorrectly) return null;
+
+  const details = [];
+  if (missingHeaders.length) details.push(`faltan: ${missingHeaders.join(', ')}`);
+  if (extraHeaders.length) details.push(`sobran o estan mal escritas: ${extraHeaders.join(', ')}`);
+  if (!orderedCorrectly && !missingHeaders.length && !extraHeaders.length) details.push('el orden no coincide');
+
+  return `${buildExactPlaceHeaderMessage()}. Problema detectado: ${details.join('; ')}.`;
+}
+
+function validatePlaceJsonFieldNames(place = {}) {
+  const headers = Object.keys(place || {});
+  const extraHeaders = headers.filter((header) => !PLACE_IMPORT_EXPORT_FIELDS.includes(header));
+  if (!extraHeaders.length) return null;
+  return `campos no soportados o mal escritos: ${extraHeaders.join(', ')}`;
+}
+
+function buildPlaceFieldHelp(citiesArray = []) {
+  const cityIds = getCityIdList(citiesArray);
+  return [
+    '<li><strong>id</strong>: (Texto, obligatorio) Identificador único en minúsculas, sin espacios. Ejemplo: <code>takayama-sanmachi-suji</code>.</li>',
+    '<li><strong>name</strong>: (Texto, obligatorio) Nombre visible del lugar.</li>',
+    `<li><strong>cityId</strong>: (Opción, obligatorio) ID de ciudad existente. Valores actuales: ${formatInlineCodeList(cityIds)}.</li>`,
+    `<li><strong>category</strong>: (Opción) ${formatInlineCodeList(categories.map((category) => category.id))}.</li>`,
+    '<li><strong>type</strong>: (Texto) Tipo descriptivo, por ejemplo <code>Templo</code>, <code>Mercado</code> o <code>Mirador</code>.</li>',
+    `<li><strong>priority</strong>: (Opción) ${formatInlineCodeList(Object.keys(priorityLabels))}. Si se deja vacío, se guarda como <code>optional</code>.</li>`,
+    '<li><strong>zone</strong>: (Texto) Barrio o zona dentro de la ciudad.</li>',
+    '<li><strong>description</strong>: (Texto largo) Descripción principal.</li>',
+    '<li><strong>address</strong>: (Texto) Dirección legible para el usuario.</li>',
+    '<li><strong>lat / lng</strong>: (Número) Coordenadas decimales con punto. Deben informarse juntas o dejarse ambas vacías.</li>',
+    '<li><strong>estimatedDuration</strong>: (Texto) Duración estimada, por ejemplo <code>1 h</code> o <code>90 min</code>.</li>',
+    '<li><strong>bestTime</strong>: (Opción) <code>mañana</code>, <code>tarde</code>, <code>noche</code> o <code>cualquier-momento</code>.</li>',
+    '<li><strong>rainyFriendly</strong>: (Booleano) <code>true</code>/<code>false</code>, <code>1</code>/<code>0</code>, <code>si</code>/<code>no</code>.</li>',
+    '<li><strong>score</strong>: (Número) Puntuación de 1 a 10. Puede tener decimales.</li>',
+    '<li><strong>requiresTicket</strong>: (Booleano) Si necesita entrada de pago o reserva.</li>',
+    '<li><strong>ticketInfo</strong>: (Texto) Precio o aclaración sobre la entrada.</li>',
+    '<li><strong>tips</strong>: (Texto largo) Consejos prácticos.</li>',
+    '<li><strong>comment</strong>: (Texto largo) Nota personal.</li>'
+  ].join('');
+}
 
 function showInlineMessage(elementId, message, tone = 'success') {
   const el = document.getElementById(elementId);
@@ -113,14 +155,180 @@ function openAdminConfirmModal({ title, message, confirmLabel, tone = 'danger', 
   });
 }
 
+function normalizeImportBoolean(value) {
+  if (value === '' || value == null) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value).trim().toLowerCase();
+  return ['true', '1', 'si', 'sí', 'yes'].includes(normalized);
+}
+
 function normalizePlannerRecord(item) {
   return {
     placeId: String(item?.placeId || '').trim(),
-    favorite: Boolean(item?.favorite),
+    favorite: normalizeImportBoolean(item?.favorite),
     status: item?.status || null,
     assignedDay: item?.assignedDay == null || item?.assignedDay === '' ? null : Number.parseInt(item.assignedDay, 10),
     order: item?.order == null || item?.order === '' ? 0 : Number.parseInt(item.order, 10)
   };
+}
+
+function normalizePlaceImportDraft(values) {
+  const obj = {};
+
+  Object.keys(values || {}).forEach((header) => {
+    let value = values[header];
+    if (value === '') return;
+
+    if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
+      try { value = JSON.parse(value); } catch {}
+    }
+
+    obj[header] = value;
+  });
+
+  ['id', 'name', 'cityId', 'category', 'priority'].forEach((field) => {
+    if (obj[field] == null) return;
+    obj[field] = String(obj[field]).trim();
+  });
+  if (obj.cityId) obj.cityId = obj.cityId.toLowerCase();
+  if (obj.category) obj.category = obj.category.toLowerCase();
+  if (obj.priority) obj.priority = obj.priority.toLowerCase();
+
+  return obj;
+}
+
+function hasImportValue(value) {
+  return value !== '' && value != null;
+}
+
+function validateCoordinatesDraft(obj) {
+  const hasLat = hasImportValue(obj.lat);
+  const hasLng = hasImportValue(obj.lng);
+  if (!hasLat && !hasLng) return null;
+  if (hasLat !== hasLng) return 'lat y lng deben informarse juntas';
+
+  const lat = Number.parseFloat(String(obj.lat).replace(',', '.'));
+  const lng = Number.parseFloat(String(obj.lng).replace(',', '.'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 'lat/lng deben ser numéricas';
+  if (lat < -90 || lat > 90) return 'lat debe estar entre -90 y 90';
+  if (lng < -180 || lng > 180) return 'lng debe estar entre -180 y 180';
+  return null;
+}
+
+function validatePlaceImportDraft(obj, cityIdSet) {
+  if (!obj.id || !obj.cityId || !obj.name) return 'faltan id, name o cityId';
+  if (!CITY_ID_PATTERN.test(obj.cityId)) return `cityId inválido: ${obj.cityId}`;
+  if (!cityIdSet.has(obj.cityId)) return `cityId no existe: ${obj.cityId}`;
+  if (obj.category && !categories.some((category) => category.id === obj.category)) return `category no válida: ${obj.category}`;
+  if (obj.priority && !priorityLabels[obj.priority]) return `priority no válida: ${obj.priority}`;
+
+  const coordinateError = validateCoordinatesDraft(obj);
+  if (coordinateError) return coordinateError;
+
+  if (hasImportValue(obj.score)) {
+    const score = Number.parseFloat(String(obj.score).replace(',', '.'));
+    if (!Number.isFinite(score) || score < 1 || score > 10) return 'score debe estar entre 1 y 10';
+  }
+
+  return null;
+}
+
+function mergeBaseCities(citiesArray = []) {
+  const normalizedInput = sortCities(citiesArray).map((city, index) => normalizeCityRecord(city, index));
+  const byId = new Map(normalizedInput.map((city) => [city.id, city]));
+  const maxSortOrder = normalizedInput.reduce((max, city, index) => {
+    const parsed = Number.parseInt(city?.sortOrder, 10);
+    return Math.max(max, Number.isFinite(parsed) ? parsed : index);
+  }, -1);
+
+  let nextSortOrder = maxSortOrder + 1;
+  buildDemoDataset().cities.forEach((city) => {
+    if (byId.has(city.id)) return;
+    byId.set(city.id, normalizeCityRecord({ ...city, sortOrder: nextSortOrder }, nextSortOrder));
+    nextSortOrder += 1;
+  });
+
+  return sortCities(Array.from(byId.values()));
+}
+
+function buildPlannerExportRows(plannerItems, places) {
+  const placeById = new Map(places.map((place) => [place.id, normalizePlaceRecord(place)]));
+  return plannerItems
+    .map((item) => normalizePlannerRecord(item))
+    .filter((item) => item.placeId)
+    .map((item) => {
+      const place = placeById.get(item.placeId);
+      return {
+        placeId: item.placeId,
+        cityId: place?.cityId || '',
+        favorite: item.favorite,
+        status: item.status,
+        assignedDay: item.assignedDay,
+        order: item.order
+      };
+    });
+}
+
+function validatePlannerImportRow(row, placeById, totalTripDays) {
+  const item = normalizePlannerRecord(row);
+  if (!item.placeId || !placeById.has(item.placeId)) {
+    return { error: 'La actividad no existe en la base de datos actual.' };
+  }
+
+  const place = placeById.get(item.placeId);
+  const rowCityId = String(row?.cityId || '').trim().toLowerCase();
+  if (rowCityId && rowCityId !== place.cityId) {
+    return { error: `cityId no coincide con la actividad ${item.placeId}.` };
+  }
+
+  if (item.status && !PLANNER_STATUS_VALUES.includes(item.status)) {
+    return { error: `status no válido: ${item.status}.` };
+  }
+
+  if (item.status === 'planned') {
+    if (!Number.isFinite(item.assignedDay) || item.assignedDay < 1 || item.assignedDay > totalTripDays) {
+      return { error: 'assignedDay debe ser un día válido del viaje para status=planned.' };
+    }
+  }
+
+  return { item };
+}
+
+function downloadJsonFile(payload, fileName) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadTextFile(content, fileName, type = 'text/csv;charset=utf-8') {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function parseWorkbookRows(arrayBuffer) {
+  const data = new Uint8Array(arrayBuffer);
+  const workbook = XLSX.read(data, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[firstSheetName];
+  return XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+}
+
+function getTotalTripDays(globalSettings = {}) {
+  if (!globalSettings.startDate || !globalSettings.endDate) return 7;
+  const start = new Date(globalSettings.startDate);
+  const end = new Date(globalSettings.endDate);
+  const days = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+  return days >= 1 && !Number.isNaN(days) ? days : 7;
 }
 
 async function boot() {
@@ -191,12 +399,18 @@ async function render() {
       </div>
       <div class="admin-card" style="margin-top: 20px;">
         <h3>&#x1F5D3;&#xFE0F; Planificaci&oacute;n y estado</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Exporta o restaura solo el estado del planner. Si el archivo contiene actividades que no existen en esta base de datos, se ignorar&aacute;n y se avisar&aacute; al finalizar.</p>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Exporta o restaura solo el estado del planner en JSON, Excel o CSV. Si el archivo contiene actividades que no existen en esta base de datos, se ignorar&aacute;n y se avisar&aacute; al finalizar. El campo <code>cityId</code> se usa como validaci&oacute;n cruzada cuando viene informado.</p>
         <div style="display:flex; gap:10px; flex-wrap: wrap;">
           <button id="btn-export-planner-json" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (JSON)</button>
+          <button id="btn-export-planner-xlsx" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (Excel)</button>
+          <button id="btn-export-planner-csv" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (CSV)</button>
           <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            &#x2B06;&#xFE0F; Importar planificaci&oacute;n
+            &#x2B06;&#xFE0F; Importar planificaci&oacute;n JSON
             <input type="file" id="input-planner-restore" accept=".json" style="display:none;">
+          </label>
+          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
+            &#x2B06;&#xFE0F; Importar planificaci&oacute;n Excel/CSV
+            <input type="file" id="input-planner-table-restore" accept=".xlsx, .xls, .csv" style="display:none;">
           </label>
         </div>
         <p id="planner-import-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
@@ -300,7 +514,7 @@ async function render() {
           &#x1F4E5; Importaci&oacute;n/Exportaci&oacute;n masiva (Excel)
           <button id="btn-csv-info" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Ver formato de campos">&#x2139;&#xFE0F;</button>
         </h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Importa actividades desde un archivo Excel (.xlsx) o CSV. Debe incluir cabeceras en la primera fila y usar valores controlados en el campo bestTime.</p>
+        <p style="color: var(--text-secondary); margin-bottom: 15px;">Importa actividades desde un archivo Excel (.xlsx) o CSV. Debe incluir las cabeceras exactas, en este orden, y usar IDs de ciudad existentes: ${formatInlineCodeList(getCityIdList(citiesArray))}.</p>
         <p style="font-size: 0.8rem; background: var(--bg-secondary); padding: 10px; border-radius: 5px; margin-bottom: 15px;">
           <strong>Columnas soportadas:</strong> ${PLACE_IMPORT_EXPORT_FIELDS.join(', ')}</p>
         <div style="display:flex; gap:10px; flex-wrap: wrap;">
@@ -321,7 +535,7 @@ async function render() {
     
     <!-- INFO MODAL -->
     <div class="modal-overlay" id="admin-modal-overlay">
-      <div class="modal" id="admin-modal"></div>
+      <div class="modal admin-modal" id="admin-modal"></div>
     </div>
   `;
 
@@ -346,13 +560,13 @@ function attachEvents() {
   document.getElementById('btn-csv-info').addEventListener('click', () => {
     modal.innerHTML = `
       <div class="modal-header">
-        <h2>&#x2139;&#xFE0F; Formato de campos CSV</h2>
+        <h2>&#x2139;&#xFE0F; Formato de campos Excel/CSV</h2>
         <button class="modal-close" id="admin-modal-close">&#x2715;</button>
       </div>
       <div class="modal-body" style="font-size:0.9rem; line-height:1.6;">
         <p>Al importar o exportar el Excel/CSV, utiliza estas columnas exactas en la primera fila:</p>
         <ul style="padding-left:20px; margin-top:10px;">
-          ${PLACE_FIELD_HELP}
+          ${buildPlaceFieldHelp(citiesArray)}
         </ul>
       </div>
     `;
@@ -391,18 +605,14 @@ function attachEvents() {
 
   // Export JSON
   document.getElementById('btn-export').addEventListener('click', async () => {
+    const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
     const data = {
       cities: sortCities(await getAll('cities')).map((city, index) => normalizeCityRecord(city, index)),
-      places: (await getAll('places')).map((place) => normalizePlaceRecord(place)),
-      planner: (await getAll('planner')).map((item) => normalizePlannerRecord(item))
+      places: places.map((place) => toImportExportRow(place)),
+      planner: buildPlannerExportRows(await getAll('planner'), places),
+      settings: await getAll('settings')
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `japon2026_backup_${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJsonFile(data, `japon2026_backup_${new Date().toISOString().slice(0,10)}.json`);
   });
 
   // Import JSON
@@ -413,14 +623,55 @@ function attachEvents() {
     reader.onload = async (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (data.cities && data.places) {
+        if (Array.isArray(data.cities) && Array.isArray(data.places)) {
+          const importedCities = mergeBaseCities(data.cities);
+          const cityIdSet = new Set(importedCities.map((city) => city.id));
+          const importedPlaces = [];
+          let skippedPlaces = 0;
+
+          data.places.forEach((place) => {
+            const fieldNameError = validatePlaceJsonFieldNames(place);
+            if (fieldNameError) {
+              skippedPlaces += 1;
+              return;
+            }
+            const draft = normalizePlaceImportDraft(place);
+            const validationError = validatePlaceImportDraft(draft, cityIdSet);
+            if (validationError) {
+              skippedPlaces += 1;
+              return;
+            }
+            importedPlaces.push(normalizePlaceRecord(draft));
+          });
+
+          const placeById = new Map(importedPlaces.map((place) => [place.id, place]));
+          const currentSettings = await getAll('settings');
+          const settings = Array.isArray(data.settings)
+            ? data.settings.find((setting) => setting.id === 'global')
+            : currentSettings.find((setting) => setting.id === 'global');
+          const totalTripDays = getTotalTripDays(settings);
+          const importedPlanner = [];
+          if (Array.isArray(data.planner)) {
+            data.planner.forEach((row) => {
+              const result = validatePlannerImportRow(row, placeById, totalTripDays);
+              if (result.item) importedPlanner.push(result.item);
+            });
+          }
+
           await clear('cities');
           await clear('places');
           await clear('planner');
-          await putAll('cities', sortCities(data.cities).map((city, index) => normalizeCityRecord(city, index)));
-          await putAll('places', data.places.map((place) => normalizePlaceRecord(place)));
-          if (data.planner) await putAll('planner', data.planner.map((item) => normalizePlannerRecord(item)).filter((item) => item.placeId));
-          alert('Backup restaurado con éxito. Recargando...');
+          await putAll('cities', importedCities);
+          if (importedPlaces.length) await putAll('places', importedPlaces);
+          if (importedPlanner.length) await putAll('planner', importedPlanner);
+          if (Array.isArray(data.settings)) {
+            await clear('settings');
+            if (data.settings.length) await putAll('settings', data.settings);
+          }
+          await ensureBaseCitiesExist();
+          alert(skippedPlaces > 0
+            ? `Backup restaurado con éxito. Se han ignorado ${skippedPlaces} actividades con campos, cityId u opciones no válidas. Recargando...`
+            : 'Backup restaurado con éxito. Recargando...');
           window.location.reload();
         } else {
           alert('Archivo JSON no valido.');
@@ -435,24 +686,36 @@ function attachEvents() {
   });
 
   document.getElementById('btn-export-planner-json')?.addEventListener('click', async () => {
-    const plannerData = (await getAll('planner'))
-      .map((item) => normalizePlannerRecord(item))
-      .filter((item) => item.placeId)
-      .map((item) => {
-        const normalized = {};
-        PLANNER_IMPORT_EXPORT_FIELDS.forEach((field) => {
-          normalized[field] = item[field] ?? null;
-        });
-        return normalized;
-      });
-    const blob = new Blob([JSON.stringify({ planner: plannerData }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `japon2026_planner_${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const plannerData = buildPlannerExportRows(await getAll('planner'), await getAll('places'));
+    downloadJsonFile({ planner: plannerData }, `japon2026_planner_${new Date().toISOString().slice(0,10)}.json`);
     showInlineMessage('planner-import-msg', 'Planificacion exportada correctamente.');
+    setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
+  });
+
+  document.getElementById('btn-export-planner-xlsx')?.addEventListener('click', async () => {
+    const plannerData = buildPlannerExportRows(await getAll('planner'), await getAll('places'));
+    if (!plannerData.length) {
+      showInlineMessage('planner-import-msg', 'No hay planificacion para exportar.', 'error');
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(plannerData, { header: PLANNER_IMPORT_EXPORT_FIELDS });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Planificacion');
+    XLSX.writeFile(workbook, `japon2026_planner_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showInlineMessage('planner-import-msg', 'Planificacion exportada a Excel correctamente.');
+    setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
+  });
+
+  document.getElementById('btn-export-planner-csv')?.addEventListener('click', async () => {
+    const plannerData = buildPlannerExportRows(await getAll('planner'), await getAll('places'));
+    if (!plannerData.length) {
+      showInlineMessage('planner-import-msg', 'No hay planificacion para exportar.', 'error');
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(plannerData, { header: PLANNER_IMPORT_EXPORT_FIELDS });
+    const csv = XLSX.utils.sheet_to_csv(worksheet);
+    downloadTextFile(csv, `japon2026_planner_${new Date().toISOString().slice(0,10)}.csv`);
+    showInlineMessage('planner-import-msg', 'Planificacion exportada a CSV correctamente.');
     setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
   });
 
@@ -469,17 +732,20 @@ function attachEvents() {
           showInlineMessage('planner-import-msg', 'Archivo de planificacion no valido.', 'error');
           return;
         }
-        const existingPlaces = await getAll('places');
-        const existingIds = new Set(existingPlaces.map((place) => place.id));
+        const existingPlaces = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+        const placeById = new Map(existingPlaces.map((place) => [place.id, place]));
+        const settingsArray = await getAll('settings');
+        const globalSettings = settingsArray.find((setting) => setting.id === 'global') || {};
+        const totalTripDays = getTotalTripDays(globalSettings);
         const byPlaceId = new Map();
         let skipped = 0;
         plannerRows.forEach((row) => {
-          const item = normalizePlannerRecord(row);
-          if (!item.placeId || !existingIds.has(item.placeId)) {
+          const result = validatePlannerImportRow(row, placeById, totalTripDays);
+          if (result.error) {
             skipped += 1;
             return;
           }
-          byPlaceId.set(item.placeId, item);
+          byPlaceId.set(result.item.placeId, result.item);
         });
         await clear('planner');
         const validItems = Array.from(byPlaceId.values());
@@ -495,6 +761,52 @@ function attachEvents() {
       }
     };
     reader.readAsText(file);
+  });
+
+  document.getElementById('input-planner-table-restore')?.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        clearInlineMessage('planner-import-msg');
+        const plannerRows = parseWorkbookRows(ev.target.result);
+        if (!plannerRows.length) {
+          showInlineMessage('planner-import-msg', 'El archivo de planificacion esta vacio.', 'error');
+          return;
+        }
+
+        const existingPlaces = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+        const placeById = new Map(existingPlaces.map((place) => [place.id, place]));
+        const settingsArray = await getAll('settings');
+        const globalSettings = settingsArray.find((setting) => setting.id === 'global') || {};
+        const totalTripDays = getTotalTripDays(globalSettings);
+        const byPlaceId = new Map();
+        let skipped = 0;
+
+        plannerRows.forEach((row) => {
+          const result = validatePlannerImportRow(row, placeById, totalTripDays);
+          if (result.error) {
+            skipped += 1;
+            return;
+          }
+          byPlaceId.set(result.item.placeId, result.item);
+        });
+
+        await clear('planner');
+        const validItems = Array.from(byPlaceId.values());
+        if (validItems.length) await putAll('planner', validItems);
+        showInlineMessage('planner-import-msg', `Planificacion importada correctamente (${validItems.length} actividades).`);
+        if (skipped > 0) {
+          showAdminToast(`Se han ignorado ${skipped} filas porque la actividad, cityId, status o dia no son validos.`, 'error');
+        }
+      } catch (err) {
+        showInlineMessage('planner-import-msg', `Error al leer la planificacion: ${err.message}`, 'error');
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsArrayBuffer(file);
   });
 
   document.getElementById('btn-load-demo-data')?.addEventListener('click', () => {
@@ -552,6 +864,22 @@ function attachEvents() {
     const coordsStr = document.getElementById('city-center').value.split(',');
     const lat = parseFloat(coordsStr[0]);
     const lng = parseFloat(coordsStr[1]);
+    const cityId = document.getElementById('city-id').value.trim().toLowerCase();
+
+    if (!CITY_ID_PATTERN.test(cityId)) {
+      alert('El ID de ciudad solo puede contener minusculas, numeros y guiones.');
+      return;
+    }
+
+    if (existingCities.some((city) => city.id === cityId)) {
+      alert('Ya existe una ciudad con ese ID.');
+      return;
+    }
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      alert('Las coordenadas centrales deben tener latitud y longitud validas.');
+      return;
+    }
 
     const color = document.getElementById('city-color').value;
     const zonesStr = document.getElementById('city-zones').value;
@@ -560,7 +888,7 @@ function attachEvents() {
     const highlights = highlightsStr.split(',').map(h => h.trim()).filter(h => h);
     
     const newCity = {
-      id: document.getElementById('city-id').value.trim().toLowerCase(),
+      id: cityId,
       name: document.getElementById('city-name').value.trim(),
       nameJa: document.getElementById('city-name-ja').value.trim(),
       color: color,
@@ -572,7 +900,7 @@ function attachEvents() {
       recommendedDays: document.getElementById('city-days').value.trim() || '3 días',
       zones: zones.length > 0 ? zones : ["Centro"],
       highlights: highlights,
-      center: [lat || 0, lng || 0],
+      center: { lat, lng },
       defaultZoom: 13,
       sortOrder: (existingCities.at(-1)?.sortOrder ?? -1) + 1
     };
@@ -591,43 +919,40 @@ function attachEvents() {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const data = new Uint8Array(ev.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        const rows = parseWorkbookRows(ev.target.result);
 
         if (rows.length === 0) {
           alert('El archivo está vacío');
           return;
         }
 
+        const headerError = validateExactPlaceWorkbookHeaders(rows);
+        if (headerError) {
+          alert(headerError);
+          return;
+        }
+
         const validPlaces = [];
+        const cityIdSet = new Set(getCityIdList(await getAll('cities')));
+        let skippedRows = 0;
         
         for (const values of rows) {
-          const obj = {};
-          
-          Object.keys(values).forEach(h => {
-            let val = values[h];
-            if (val === "") return;
-            
-            // Attempt to parse objects/arrays back
-            if (typeof val === 'string' && (val.startsWith('{') || val.startsWith('['))) {
-              try { val = JSON.parse(val); } catch(e) {}
-            }
-
-            obj[h] = val;
-          });
-
-          if (obj.id && obj.cityId && obj.name) {
-            if (!obj.priority) obj.priority = 'optional';
-            validPlaces.push(normalizePlaceRecord(obj));
+          const obj = normalizePlaceImportDraft(values);
+          const validationError = validatePlaceImportDraft(obj, cityIdSet);
+          if (validationError) {
+            skippedRows += 1;
+            continue;
           }
+
+          if (!obj.priority) obj.priority = 'optional';
+          validPlaces.push(normalizePlaceRecord(obj));
         }
 
         if (validPlaces.length > 0) {
           await putAll('places', validPlaces);
-          document.getElementById('csv-msg').textContent = `✅ Importados ${validPlaces.length} lugares desde Excel con éxito.`;
+          document.getElementById('csv-msg').textContent = skippedRows > 0
+            ? `✅ Importados ${validPlaces.length} lugares. ${skippedRows} filas ignoradas por validación.`
+            : `✅ Importados ${validPlaces.length} lugares desde Excel con éxito.`;
           document.getElementById('csv-msg').style.display = 'block';
           setTimeout(() => {
             document.getElementById('csv-msg').style.display = 'none';
@@ -672,11 +997,15 @@ function attachEvents() {
       const modal = document.getElementById('admin-modal');
 
       modal.innerHTML = `
-        <div class="modal-header">
-          <h2>&#x270F;&#xFE0F; Editar ciudad: ${city.name}</h2>
-          <button class="modal-close" id="admin-modal-close">&#x2715;</button>
-        </div>
-        <div class="modal-body">
+        <div class="modal-scroll admin-city-edit-modal">
+          <div class="modal-header admin-city-edit-header">
+            <div>
+              <span class="admin-modal-kicker">Ciudad</span>
+              <h2>&#x270F;&#xFE0F; Editar ciudad: ${city.name}</h2>
+            </div>
+            <button class="modal-close" id="admin-modal-close" aria-label="Cerrar">&#x2715;</button>
+          </div>
+          <div class="modal-body admin-city-edit-body">
           <form id="form-edit-city" class="admin-form">
             <div class="form-group">
               <label>ID (No editable)</label>
@@ -731,8 +1060,12 @@ function attachEvents() {
               <label>Coordenadas Centrales (Lat, Lng separadas por coma)</label>
               <input type="text" id="edit-city-center" value="${Array.isArray(city.center) ? city.center.join(', ') : (city.center ? city.center.lat + ', ' + city.center.lng : '')}" required>
             </div>
-            <button type="submit" class="filter-pill active" style="margin-top:10px;">Guardar Cambios</button>
+            <div class="admin-modal-actions">
+              <button type="button" class="filter-pill" id="admin-modal-cancel">Cancelar</button>
+              <button type="submit" class="filter-pill active">Guardar Cambios</button>
+            </div>
           </form>
+          </div>
         </div>
       `;
       modalOverlay.classList.add('open');
@@ -749,12 +1082,22 @@ function attachEvents() {
         modalOverlay.classList.remove('open');
         document.body.style.overflow = '';
       });
+      document.getElementById('admin-modal-cancel').addEventListener('click', () => {
+        modalOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+      });
 
       document.getElementById('form-edit-city').addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const coordsStr = document.getElementById('edit-city-center').value.split(',');
         const lat = parseFloat(coordsStr[0]);
         const lng = parseFloat(coordsStr[1]);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          showAdminToast('Las coordenadas centrales deben tener latitud y longitud validas.', 'error');
+          return;
+        }
+
         const color = document.getElementById('edit-city-color').value;
         const zonesStr = document.getElementById('edit-city-zones').value;
         const zones = zonesStr.split(',').map(z => z.trim()).filter(z => z);
@@ -774,7 +1117,7 @@ function attachEvents() {
           recommendedDays: document.getElementById('edit-city-days').value.trim() || '3 días',
           zones: zones.length > 0 ? zones : ["Centro"],
           highlights: highlights,
-          center: [lat || 0, lng || 0]
+          center: { lat, lng }
         };
 
         await putAll('cities', [normalizeCityRecord(updatedCity, city.sortOrder ?? 999)]);

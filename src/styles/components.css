@@ -167,6 +167,14 @@ body.nav-mobile-open { overflow: hidden; }
 .modal-header { padding: 0 var(--space-lg) var(--space-md); display: flex; justify-content: space-between; align-items: flex-start; }
 .modal-close { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--bg-secondary); font-size: 1.2rem; }
 .modal-body { padding: 0 var(--space-lg) var(--space-2xl); }
+.admin-modal { max-width: min(760px, calc(100vw - 24px)); }
+.admin-city-edit-modal { display: flex; flex-direction: column; }
+.admin-city-edit-header { position: sticky; top: 0; z-index: 3; gap: var(--space-md); align-items: center; padding: var(--space-lg); background: rgba(250,250,247,0.96); border-bottom: 1px solid var(--border-light); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.admin-city-edit-header h2 { margin: 2px 0 0; font-size: 1.25rem; line-height: 1.2; }
+.admin-modal-kicker { display: block; color: var(--text-tertiary); font-size: 0.72rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.admin-city-edit-body { padding-top: var(--space-lg); padding-bottom: 0; }
+.admin-modal-actions { position: sticky; bottom: 0; z-index: 2; display: flex; justify-content: flex-end; gap: var(--space-sm); margin: var(--space-md) calc(var(--space-lg) * -1) 0; padding: var(--space-md) var(--space-lg); background: rgba(250,250,247,0.96); border-top: 1px solid var(--border-light); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.admin-modal-actions .filter-pill { margin: 0; min-height: 38px; padding: 0 16px; }
 .modal-toolbar { margin-bottom: var(--space-md); }
 .modal-toolbar-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-sm); flex-wrap: wrap; }
 .modal-badges-inline { margin-bottom: 0; flex: 1 1 360px; align-items: center; }
@@ -191,6 +199,14 @@ body.nav-mobile-open { overflow: hidden; }
   .modal-overlay { align-items: center; }
   .modal { --modal-max-height: 85vh; border-radius: var(--radius-xl); transform: translateY(30px); opacity: 0; }
   .modal-overlay.open .modal { transform: translateY(0); opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .admin-modal { max-width: 100%; }
+  .admin-city-edit-header { padding: var(--space-md); }
+  .admin-city-edit-body { padding-inline: var(--space-md); }
+  .admin-modal-actions { margin-inline: calc(var(--space-md) * -1); padding-inline: var(--space-md); }
+  .admin-modal-actions .filter-pill { flex: 1; justify-content: center; }
 }
 
 /* --- Zone Section --- */

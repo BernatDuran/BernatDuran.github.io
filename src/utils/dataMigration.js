@@ -81,7 +81,29 @@ export async function runDataMigration() {
     }
   }
 
+  await ensureBaseCitiesExist();
   await applyProfessionalCuration();
+}
+
+export async function ensureBaseCitiesExist() {
+  const demoDataset = buildDemoDataset();
+  const existingCities = await getAll('cities');
+  const existingIds = new Set(existingCities.map((city) => city.id));
+  const maxSortOrder = existingCities.reduce((max, city, index) => {
+    const parsed = Number.parseInt(city?.sortOrder, 10);
+    return Math.max(max, Number.isFinite(parsed) ? parsed : index);
+  }, -1);
+
+  const missingCities = demoDataset.cities
+    .filter((city) => !existingIds.has(city.id))
+    .map((city, index) => normalizeCityRecord({
+      ...city,
+      sortOrder: maxSortOrder + index + 1
+    }, maxSortOrder + index + 1));
+
+  if (missingCities.length) {
+    await putAll('cities', missingCities);
+  }
 }
 
 async function applyProfessionalCuration() {

@@ -60,11 +60,13 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
 
   let totalTripDays = 1;
   let datesFormatted = '30 junio &mdash; 16 julio 2026';
+  let tripStartDate = null;
   if (globalSettings && globalSettings.startDate && globalSettings.endDate) {
-    const start = new Date(globalSettings.startDate);
-    const end = new Date(globalSettings.endDate);
+    const start = parseLocalDate(globalSettings.startDate);
+    const end = parseLocalDate(globalSettings.endDate);
     const days = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
     if (days >= 1 && !isNaN(days)) totalTripDays = days;
+    tripStartDate = start;
     const formattedStart = start.toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
     const formattedEnd = end.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
     datesFormatted = `${formattedStart} &mdash; ${formattedEnd}`;
@@ -87,6 +89,28 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   let mapInstance = null;
   let scoreDropdownOpen = false;
   let citySectionFocus = 'activities';
+
+  function parseLocalDate(value) {
+    const [year, month, day] = String(value || '').split('-').map(Number);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      return new Date(year, month - 1, day);
+    }
+    return new Date(value);
+  }
+
+  function formatShortDate(date) {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = String(date.getFullYear()).slice(-2);
+    return `${day}/${month}/${year}`;
+  }
+
+  function formatPlannerAssignmentDayLabel(dayNum) {
+    if (!tripStartDate || Number.isNaN(tripStartDate.getTime())) return `D&iacute;a ${dayNum}`;
+    const date = new Date(tripStartDate);
+    date.setDate(date.getDate() + Number(dayNum) - 1);
+    return `D&iacute;a ${dayNum} - ${formatShortDate(date)}`;
+  }
 
   function captureInputFocusState() {
     const activeElement = document.activeElement;
@@ -587,7 +611,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     }
 
     const dayOptions = Array.from({length: totalTripDays}, (_, i) => i + 1)
-      .map(d => `<option value="${d}" ${item.assignedDay == d ? 'selected' : ''}>D&iacute;a ${d}</option>`).join('');
+      .map(d => `<option value="${d}" ${item.assignedDay == d ? 'selected' : ''}>${formatPlannerAssignmentDayLabel(d)}</option>`).join('');
 
     return `
       <div class="planner-chip-container">

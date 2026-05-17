@@ -105,7 +105,7 @@ function render(citiesArray, allPlaces, globalSettings) {
       <div class="container">
         <div class="home-section-title">
           <h2>Explora las ciudades</h2>
-          <p>Tres ciudades, tres personalidades, una aventura inolvidable</p>
+          <p>Cuatro ciudades, cuatro personalidades, una aventura inolvidable</p>
         </div>
         <div class="city-cards">
           ${citiesArray.map((city) => renderCityCard(city, allPlaces)).join('')}

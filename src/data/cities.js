@@ -64,6 +64,28 @@ export const cities = {
     tripDates: 'Últimos días del viaje',
     center: { lat: 34.6937, lng: 135.5023 },
     defaultZoom: 13
+  },
+  takayama: {
+    id: 'takayama',
+    sortOrder: 3,
+    name: 'Takayama',
+    nameJa: '高山',
+    slug: 'takayama',
+    tagline: 'La puerta a los Alpes japoneses',
+    color: '#059669',
+    colorLight: '#d1fae5',
+    colorDark: '#064e3b',
+    gradient: 'linear-gradient(135deg, #064e3b 0%, #059669 100%)',
+    description: 'Ciudad histórica de montaña en la región de Hida, famosa por sus calles tradicionales, casas de madera, mercados matinales y ambiente tranquilo. Takayama aporta una pausa más rural y artesanal dentro del viaje por Japón.',
+    summary: 'Un destino compacto y muy caminable, ideal para descubrir arquitectura tradicional, gastronomía de Hida, sake local y excursiones por los Alpes japoneses.',
+    idealFor: 'Quien busca Japón tradicional, ritmo pausado, calles históricas, mercados locales y paisaje de montaña',
+    recommendedDays: '1-2 días',
+    zones: ['Sanmachi Suji', 'Mercados matinales', 'Hida no Sato', 'Higashiyama', 'Alrededores'],
+    highlights: ['Sanmachi Suji', 'Mercado Miyagawa', 'Hida no Sato', 'Sake local', 'Alpes japoneses'],
+    heroImage: null,
+    tripDates: 'Escapada de montaña del viaje',
+    center: { lat: 36.1461, lng: 137.2522 },
+    defaultZoom: 13
   }
 };
 
@@ -73,8 +95,8 @@ export const tripInfo = {
   dates: { start: '2026-06-30', end: '2026-07-16' },
   datesFormatted: '30 junio — 16 julio 2026',
   totalDays: 17,
-  totalCities: 3,
-  description: '17 días descubriendo la esencia de Japón: desde los rascacielos de Tokio hasta los templos de Kioto, pasando por la gastronomía de Osaka.'
+  totalCities: 4,
+  description: '17 días descubriendo la esencia de Japón: desde los rascacielos de Tokio hasta los templos de Kioto, pasando por la gastronomía de Osaka y el Japón tradicional de montaña en Takayama.'
 };
 
 export const categories = [

@@ -2,7 +2,7 @@
 
 Aplicación web local-first para preparar, organizar y llevar durante el viaje un itinerario por Japón. El proyecto combina guía de actividades, planificación diaria, vista mapa, administración de datos e importación/exportación para mantener el viaje bajo control sin depender de un backend.
 
-La app está pensada actualmente para un viaje concreto a Japón 2026, con tres ciudades principales: Tokio, Kioto y Osaka. Aun así, la estructura ya permite mantener actividades, ciudades, planificación y backups de forma bastante flexible.
+La app está pensada actualmente para un viaje concreto a Japón 2026, con cuatro ciudades principales: Tokio, Kioto, Osaka y Takayama. Aun así, la estructura ya permite mantener actividades, ciudades, planificación y backups de forma bastante flexible.
 
 ## Enlace
 
@@ -36,6 +36,7 @@ https://bernatduran.github.io/
 - `city.html?id=tokyo`: vista de ciudad con actividades, filtros, mapa y edición.
 - `city.html?id=kyoto`: vista de Kioto.
 - `city.html?id=osaka`: vista de Osaka.
+- `city.html?id=takayama`: vista de Takayama.
 - `planner.html`: planificación diaria, bandeja, calendario, mapa y exportación PDF.
 - `admin.html`: configuración, datos, importación/exportación, orden de ciudades y acciones de mantenimiento.
 - `tools.html`: página auxiliar para herramientas del proyecto.
