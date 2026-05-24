@@ -667,6 +667,24 @@ function renderMiniCard(place, plannerItem) {
   const scoreText = formatScore(place.score);
   const durationText = place.estimatedDuration || '';
   const hasCity = Boolean(cityName);
+  const bestTimeIconByValue = {
+    'mañana': { icon: '&#x1F305;', label: 'Mejor por la mañana' },
+    tarde: { icon: '&#x1F307;', label: 'Mejor por la tarde' },
+    noche: { icon: '&#x1F319;', label: 'Mejor por la noche' }
+  };
+  const bestTimeIcon = bestTimeIconByValue[place.bestTime]
+    ? `<span class="planner-mini-best-time-icon" title="${bestTimeIconByValue[place.bestTime].label}" aria-label="${bestTimeIconByValue[place.bestTime].label}">${bestTimeIconByValue[place.bestTime].icon}</span>`
+    : '';
+  const ticketIcon = place.requiresTicket
+    ? `<span class="planner-mini-ticket-chip" title="Requiere entrada" aria-label="Requiere entrada">&#x1F3AB;</span>`
+    : '';
+  const metaItems = [
+    hasCity ? `<span class="planner-mini-city">${cityName}</span>` : '',
+    `<span title="${prio?.label || 'Prioridad'}" style="font-size:0.74rem;">${prio?.icon || ''}</span>`,
+    bestTimeIcon,
+    ticketIcon,
+    durationText ? `<span class="planner-mini-duration-inline">${escapeHtml(durationText)}</span>` : ''
+  ].filter(Boolean);
 
   return `
     <div class="planner-mini-card ${isDiscarded ? 'planner-card-discarded' : ''}"
@@ -675,10 +693,7 @@ function renderMiniCard(place, plannerItem) {
       <div class="planner-mini-info">
         <div class="planner-mini-name">${place.name}</div>
         <div class="planner-mini-meta">
-          ${hasCity ? `<span class="planner-mini-city">${cityName}</span>` : ''}
-          ${hasCity ? `<span class="planner-mini-sep">&middot;</span>` : ''}
-          <span title="${prio.label}" style="font-size:0.74rem;">${prio.icon}</span>
-          ${durationText ? `<span class="planner-mini-sep">&middot;</span><span class="planner-mini-duration-inline">${escapeHtml(durationText)}</span>` : ''}
+          ${metaItems.map((item, index) => `${index > 0 ? '<span class="planner-mini-sep">&middot;</span>' : ''}${item}`).join('')}
         </div>
       </div>
       <div style="display:flex; align-items:center; flex-shrink:0;">
@@ -835,7 +850,8 @@ function renderModal(place) {
     timeIcon: place.bestTime ? '' : '&#x2600;&#xFE0F;',
     bestTimeLabel: formatBestTimeLabel(place.bestTime),
     closeButtonId: 'planner-modal-close',
-    showEditButton: false,
+    editButtonId: 'planner-edit-place-btn',
+    showEditButton: true,
     mapContainerId: `modal-map-${place.id}`,
     commentLabel: 'Comentarios'
   });
@@ -3123,9 +3139,23 @@ function openPlaceModal(place) {
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
   document.getElementById('planner-modal-close')?.addEventListener('click', closePlaceModal);
+  document.getElementById('planner-edit-place-btn')?.addEventListener('click', () => openPlannerPlaceEditor(place));
   setTimeout(() => {
     renderPlaceMap(`modal-map-${place.id}`, place);
   }, 100);
+}
+
+function openPlannerPlaceEditor(place) {
+  if (!place?.id || !place?.cityId) return;
+  try {
+    sessionStorage.setItem('pendingPlaceEdit', JSON.stringify({
+      placeId: place.id,
+      createdAt: Date.now()
+    }));
+  } catch {
+    // If sessionStorage is unavailable, the URL parameter still opens the editor.
+  }
+  window.location.href = `/city.html?id=${encodeURIComponent(place.cityId)}&editPlace=${encodeURIComponent(place.id)}`;
 }
 
 function closePlaceModal() {

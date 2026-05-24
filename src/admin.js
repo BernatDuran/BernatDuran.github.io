@@ -390,6 +390,98 @@ function getTotalTripDays(globalSettings = {}) {
   return days >= 1 && !Number.isNaN(days) ? days : 7;
 }
 
+const ADMIN_TABS = [
+  {
+    id: 'viaje',
+    icon: '&#x1F5FA;&#xFE0F;',
+    label: 'Viaje y ciudades',
+    description: 'Fechas y estructura'
+  },
+  {
+    id: 'datos',
+    icon: '&#x1F4E5;',
+    label: 'Datos',
+    description: 'Importar y exportar'
+  },
+  {
+    id: 'mantenimiento',
+    icon: '&#x1F6E0;&#xFE0F;',
+    label: 'Mantenimiento',
+    description: 'Backup y limpieza'
+  }
+];
+
+const DEFAULT_ADMIN_TAB = 'viaje';
+
+function getAdminActiveTab() {
+  const hash = window.location.hash.replace('#', '').trim();
+  return ADMIN_TABS.some((tab) => tab.id === hash) ? hash : DEFAULT_ADMIN_TAB;
+}
+
+function renderAdminTabs(activeTab) {
+  return ADMIN_TABS.map((tab) => `
+    <button type="button"
+            class="admin-tab ${activeTab === tab.id ? 'active' : ''}"
+            data-admin-tab="${tab.id}"
+            id="admin-tab-${tab.id}"
+            role="tab"
+            aria-controls="admin-panel-${tab.id}"
+            aria-selected="${activeTab === tab.id ? 'true' : 'false'}">
+      <span class="admin-tab-icon" aria-hidden="true">${tab.icon}</span>
+      <span>
+        <strong>${tab.label}</strong>
+        <small>${tab.description}</small>
+      </span>
+    </button>
+  `).join('');
+}
+
+function renderAdminPanel(id, title, description, body, activeTab) {
+  return `
+    <section class="admin-tab-panel ${activeTab === id ? 'active' : ''}"
+             data-admin-panel="${id}"
+             id="admin-panel-${id}"
+             role="tabpanel"
+             aria-labelledby="admin-tab-${id}"
+             aria-hidden="${activeTab === id ? 'false' : 'true'}">
+      <div class="admin-panel-header">
+        <div>
+          <span class="admin-panel-kicker">M&oacute;dulo</span>
+          <h3>${title}</h3>
+          <p>${description}</p>
+        </div>
+      </div>
+      ${body}
+    </section>
+  `;
+}
+
+function setActiveAdminTab(tabId, updateHash = true) {
+  const nextTab = ADMIN_TABS.some((tab) => tab.id === tabId) ? tabId : DEFAULT_ADMIN_TAB;
+  document.querySelectorAll('[data-admin-tab]').forEach((button) => {
+    const isActive = button.dataset.adminTab === nextTab;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+
+  document.querySelectorAll('[data-admin-panel]').forEach((panel) => {
+    const isActive = panel.dataset.adminPanel === nextTab;
+    panel.classList.toggle('active', isActive);
+    panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+  });
+
+  if (updateHash) {
+    const nextHash = `#${nextTab}`;
+    if (window.location.hash !== nextHash) {
+      history.replaceState(null, '', nextHash);
+    }
+  }
+}
+
+function syncAdminTabsFromHash() {
+  setActiveAdminTab(getAdminActiveTab(), false);
+}
+
 async function boot() {
   await runDataMigration();
   render();
@@ -397,9 +489,9 @@ async function boot() {
 
 async function render() {
   const citiesArray = sortCities(await getAll('cities'));
-  const placesArray = await getAll('places');
   const settingsArray = await getAll('settings');
   const globalSettings = settingsArray.find(s => s.id === 'global') || {};
+  const activeTab = getAdminActiveTab();
 
   app.innerHTML = `
     <nav class="nav" id="main-nav">
@@ -411,104 +503,183 @@ async function render() {
         </div>
       </div>
     </nav>
-    <div class="container" style="padding-top: calc(var(--nav-height) + var(--space-xl)); padding-bottom: var(--space-xl);">
-      <div class="home-section-title">
-        <h2>&#x2699;&#xFE0F; Panel de Administraci&oacute;n</h2>
-        <p>Configuraci&oacute;n avanzada, importaci&oacute;n y copias de seguridad.</p>
-      </div>
+    <main class="admin-page">
+      <div class="admin-workspace">
+        <aside class="admin-tabs" role="tablist" aria-label="Secciones de administraci&oacute;n">
+          ${renderAdminTabs(activeTab)}
+        </aside>
 
-      <!-- GLOBAL SETTINGS SECTION -->
-      <div class="admin-card" style="margin-bottom: 20px;">
-        <h3>&#x1F30D; Configuraci&oacute;n del viaje</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Establece las fechas globales de tu viaje para el Planificador ("Mi Ruta").</p>
-        <div style="display:flex; gap:10px; flex-wrap: wrap; align-items:flex-end;">
-          <div class="form-group" style="margin:0;">
-            <label>Fecha de inicio</label>
-            <input type="date" id="global-start-date" value="${globalSettings.startDate || ''}" style="padding:8px; border-radius:4px; border:1px solid var(--border);">
-          </div>
-          <div class="form-group" style="margin:0;">
-            <label>Fecha de fin</label>
-            <input type="date" id="global-end-date" value="${globalSettings.endDate || ''}" style="padding:8px; border-radius:4px; border:1px solid var(--border);">
-          </div>
-          <div class="form-group" style="margin:0; min-width: 200px;">
-            <label>Estilo de enlaces de Mapa</label>
-            <select id="global-map-link-style" style="padding:8px; border-radius:4px; border:1px solid var(--border); width: 100%;">
-              <option value="smart" ${globalSettings.mapLinkStyle === 'smart' || !globalSettings.mapLinkStyle ? 'selected' : ''}>Inteligente (App nativa / ficha Google)</option>
-              <option value="coords" ${globalSettings.mapLinkStyle === 'coords' ? 'selected' : ''}>Solo coordenadas (modo cl&aacute;sico)</option>
-            </select>
-          </div>
-          <button id="btn-save-settings" class="maps-link-btn" style="background:var(--accent); border:none; cursor:pointer;">&#x1F4BE; Guardar ajustes</button>
-        </div>
-        <p id="settings-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
-      </div>
-
-      <!-- BACKUP SECTION -->
-      <div class="admin-card">
-        <h3>&#x1F4BE; Copias de seguridad</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Guarda una copia de todos tus datos (ciudades, lugares y planificaci&oacute;n) en un archivo JSON.</p>
-        <div style="display:flex; gap:10px; flex-wrap: wrap;">
-          <button id="btn-export" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar backup (JSON)</button>
-          
-          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            &#x2B06;&#xFE0F; Restaurar backup
-            <input type="file" id="input-restore" accept=".json" style="display:none;">
-          </label>
-        </div>
-        <p id="backup-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
-      </div>
-      <div class="admin-card" style="margin-top: 20px;">
-        <h3>&#x1F5D3;&#xFE0F; Planificaci&oacute;n y estado</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Exporta o restaura solo el estado del planner en JSON, Excel o CSV. Si el archivo contiene actividades que no existen en esta base de datos, se ignorar&aacute;n y se avisar&aacute; al finalizar. El campo <code>cityId</code> se usa como validaci&oacute;n cruzada cuando viene informado.</p>
-        <div style="display:flex; gap:10px; flex-wrap: wrap;">
-          <button id="btn-export-planner-json" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (JSON)</button>
-          <button id="btn-export-planner-xlsx" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (Excel)</button>
-          <button id="btn-export-planner-csv" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar planificaci&oacute;n (CSV)</button>
-          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            &#x2B06;&#xFE0F; Importar planificaci&oacute;n JSON
-            <input type="file" id="input-planner-restore" accept=".json" style="display:none;">
-          </label>
-          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            &#x2B06;&#xFE0F; Importar planificaci&oacute;n Excel/CSV
-            <input type="file" id="input-planner-table-restore" accept=".xlsx, .xls, .csv" style="display:none;">
-          </label>
-        </div>
-        <p id="planner-import-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
-      </div>
-
-      <div class="admin-card" style="margin-top: 20px;">
-        <h3>&#x1F9EA; Datos demo y limpieza</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Restaura la app a los datos de ejemplo actuales o limpia partes concretas para probar flujos sin tocar c&oacute;digo.</p>
-        <div style="display:flex; gap:10px; flex-wrap: wrap;">
-          <button id="btn-load-demo-data" class="maps-link-btn" style="background:var(--accent);">&#x1F504; Cargar datos de ejemplo</button>
-          <button id="btn-clear-planner" class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary);">&#x1F9F9; Limpiar planificador</button>
-          <button id="btn-clear-places" class="maps-link-btn" style="background:#fee2e2; color:#991b1b;">&#x26A0;&#xFE0F; Limpiar actividades</button>
-        </div>
-        <p style="color: var(--text-tertiary); font-size:0.86rem; margin-top:10px;">Cargar datos de ejemplo sustituye ciudades, actividades, planificador y ajustes globales. Limpiar actividades tambi&eacute;n limpia el planificador para evitar referencias rotas.</p>
-      </div>
-
-      <!-- CITIES LIST SECTION -->
-      <div class="admin-card" style="margin-top: 20px;">
-        <h3>&#x1F3D9;&#xFE0F; Ciudades registradas</h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Reordena las ciudades arrastrando. Este orden se aplicar&aacute; en la home y en toda la navegaci&oacute;n.</p>
-        <div id="cities-sortable-list" style="display:flex; flex-direction:column; gap:10px;">
-          ${citiesArray.map(city => `
-            <div class="admin-city-row" data-city-id="${city.id}" style="display:flex; justify-content:space-between; align-items:center; padding:12px; border:1px solid var(--border-light); border-left: 5px solid ${city.color}; border-radius:var(--radius-md); background:var(--bg-primary);">
-              <div style="display:flex; align-items:center; gap:12px;">
-                <span class="admin-city-grip" aria-hidden="true">&#x2630;</span>
+        <div class="admin-panels">
+          ${renderAdminPanel('viaje', 'Viaje y ciudades', 'Fechas globales, estilo de mapas y estructura de ciudades.', `
+            <div class="admin-card admin-travel-settings-card">
+              <div class="admin-section-heading">
                 <div>
-                  <div style="font-weight:bold;">${city.name} ${city.nameJa ? `<span style="font-size:0.85em; color:var(--text-secondary);">${city.nameJa}</span>` : ''}</div>
-                  <div style="font-size:0.85rem; color:var(--text-secondary);">ID: ${city.id} &middot; ${formatRecommendedDays(city.recommendedDays)} &middot; ${city.zones.length} zonas</div>
+                  <h3>&#x1F30D; Configuraci&oacute;n del viaje</h3>
                 </div>
               </div>
-              <button class="filter-pill btn-edit-city" data-city-id="${city.id}">&#x270F;&#xFE0F; Editar</button>
+              <div class="admin-form-grid admin-travel-settings-grid">
+                <div class="form-group">
+                  <label>Fecha de inicio</label>
+                  <input type="date" id="global-start-date" value="${globalSettings.startDate || ''}">
+                </div>
+                <div class="form-group">
+                  <label>Fecha de fin</label>
+                  <input type="date" id="global-end-date" value="${globalSettings.endDate || ''}">
+                </div>
+                <div class="form-group">
+                  <label>Estilo de enlaces de Mapa</label>
+                  <select id="global-map-link-style">
+                    <option value="smart" ${globalSettings.mapLinkStyle === 'smart' || !globalSettings.mapLinkStyle ? 'selected' : ''}>Inteligente (App nativa / ficha Google)</option>
+                    <option value="coords" ${globalSettings.mapLinkStyle === 'coords' ? 'selected' : ''}>Solo coordenadas (modo cl&aacute;sico)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="admin-sticky-actions">
+                <p id="settings-msg" class="admin-inline-msg"></p>
+                <button id="btn-save-settings" class="admin-action-btn primary compact" type="button">&#x1F4BE; Guardar</button>
+              </div>
             </div>
-          `).join('')}
+
+            <div class="admin-card admin-city-card">
+              <div class="admin-section-heading">
+                <div>
+                  <h3>&#x1F3D9;&#xFE0F; Ciudades registradas</h3>
+                  <p>Reordena las ciudades arrastrando. Este orden se aplica en la home y navegaci&oacute;n.</p>
+                </div>
+                <button type="button" id="btn-add-city" class="admin-action-btn primary compact">&#x2795; A&ntilde;adir ciudad</button>
+              </div>
+              <div id="cities-sortable-list" class="admin-city-list">
+                ${citiesArray.map(city => `
+                  <div class="admin-city-row" data-city-id="${city.id}" style="--city-color:${city.color};">
+                    <div class="admin-city-main">
+                      <span class="admin-city-grip" aria-hidden="true">&#x2630;</span>
+                      <div>
+                        <div class="admin-city-name">${city.name} ${city.nameJa ? `<span>${city.nameJa}</span>` : ''}</div>
+                        <div class="admin-city-meta">ID: ${city.id} &middot; ${formatRecommendedDays(city.recommendedDays)} &middot; ${(city.zones || []).length} zonas</div>
+                      </div>
+                    </div>
+                    <button class="filter-pill btn-edit-city" data-city-id="${city.id}">&#x270F;&#xFE0F; Editar</button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `, activeTab)}
+
+          ${renderAdminPanel('datos', 'Datos', 'Importaci&oacute;n y exportaci&oacute;n de actividades y planificaci&oacute;n.', `
+            <div class="admin-data-grid">
+              <div class="admin-card">
+                <div class="admin-section-heading">
+                  <div>
+                    <h3>&#x1F4E5; Actividades Excel/CSV</h3>
+                    <p>Importa o exporta actividades con las cabeceras exactas y validaci&oacute;n por ciudad.</p>
+                  </div>
+                  <button id="btn-csv-info" class="admin-icon-btn" title="Ver formato de campos" type="button">&#x2139;&#xFE0F;</button>
+                </div>
+                <p class="admin-muted">IDs de ciudad actuales: ${formatInlineCodeList(getCityIdList(citiesArray))}.</p>
+                <p class="admin-code-note"><strong>Columnas:</strong> ${PLACE_IMPORT_EXPORT_FIELDS.join(', ')}</p>
+                <div class="admin-action-row">
+                  <label class="admin-action-btn secondary">
+                    &#x2B06;&#xFE0F; Importar Excel/CSV
+                    <input type="file" id="input-csv" accept=".xlsx, .xls, .csv">
+                  </label>
+                  <button id="btn-export-csv" class="admin-action-btn primary" type="button">&#x2B07;&#xFE0F; Exportar actividades</button>
+                </div>
+                <p id="csv-msg" class="admin-inline-msg"></p>
+              </div>
+
+              <div class="admin-card">
+                <div class="admin-section-heading">
+                  <div>
+                    <h3>&#x1F5D3;&#xFE0F; Planificaci&oacute;n y estado</h3>
+                    <p>Exporta o restaura solo el estado del planner sin sustituir la base de actividades.</p>
+                  </div>
+                </div>
+                <p class="admin-muted">Si el archivo contiene actividades inexistentes, se ignorar&aacute;n y se avisar&aacute; al finalizar. El campo <code>cityId</code> se usa como validaci&oacute;n cruzada cuando viene informado.</p>
+                <div class="admin-action-group">
+                  <span>Exportar</span>
+                  <div class="admin-action-row">
+                    <button id="btn-export-planner-json" class="admin-action-btn primary" type="button">JSON</button>
+                    <button id="btn-export-planner-xlsx" class="admin-action-btn primary" type="button">Excel</button>
+                    <button id="btn-export-planner-csv" class="admin-action-btn primary" type="button">CSV</button>
+                  </div>
+                </div>
+                <div class="admin-action-group">
+                  <span>Importar</span>
+                  <div class="admin-action-row">
+                    <label class="admin-action-btn secondary">
+                      JSON
+                      <input type="file" id="input-planner-restore" accept=".json">
+                    </label>
+                    <label class="admin-action-btn secondary">
+                      Excel/CSV
+                      <input type="file" id="input-planner-table-restore" accept=".xlsx, .xls, .csv">
+                    </label>
+                  </div>
+                </div>
+                <p id="planner-import-msg" class="admin-inline-msg"></p>
+              </div>
+            </div>
+          `, activeTab)}
+
+          ${renderAdminPanel('mantenimiento', 'Mantenimiento', 'Copias completas, datos de ejemplo y acciones destructivas.', `
+            <div class="admin-data-grid">
+              <div class="admin-card">
+                <div class="admin-section-heading">
+                  <div>
+                    <h3>&#x1F4BE; Copias de seguridad</h3>
+                    <p>Guarda o restaura todos los datos: ciudades, actividades, planificaci&oacute;n y ajustes.</p>
+                  </div>
+                </div>
+                <div class="admin-action-row">
+                  <button id="btn-export" class="admin-action-btn primary" type="button">&#x2B07;&#xFE0F; Exportar backup JSON</button>
+                  <label class="admin-action-btn secondary">
+                    &#x2B06;&#xFE0F; Restaurar backup
+                    <input type="file" id="input-restore" accept=".json">
+                  </label>
+                </div>
+                <p id="backup-msg" class="admin-inline-msg"></p>
+              </div>
+
+              <div class="admin-card admin-danger-zone">
+                <div class="admin-section-heading">
+                  <div>
+                    <h3>&#x1F9EA; Datos demo y limpieza</h3>
+                    <p>Acciones para volver a datos de ejemplo o limpiar datos por alcance.</p>
+                  </div>
+                </div>
+                <div class="admin-action-row">
+                  <button id="btn-load-demo-data" class="admin-action-btn primary" type="button">&#x1F504; Cargar datos de ejemplo</button>
+                  <button id="btn-clear-planner" class="admin-action-btn secondary" type="button">&#x1F9F9; Limpiar planificador</button>
+                  <button id="btn-clear-places" class="admin-action-btn danger" type="button">&#x26A0;&#xFE0F; Limpiar actividades</button>
+                </div>
+                <p class="admin-danger-note">Cargar datos de ejemplo sustituye ciudades, actividades, planificador y ajustes globales. Limpiar actividades tambi&eacute;n limpia el planificador asociado para evitar referencias rotas.</p>
+              </div>
+            </div>
+          `, activeTab)}
         </div>
       </div>
+    </main>
+    
+    <!-- INFO MODAL -->
+    <div class="modal-overlay" id="admin-modal-overlay">
+      <div class="modal admin-modal" id="admin-modal"></div>
+    </div>
+  `;
 
-      <!-- ADD CITY SECTION -->
-      <div class="admin-card" style="margin-top: 20px;">
-        <h3>&#x1F3D9;&#xFE0F; A&ntilde;adir nueva ciudad</h3>
+  attachEvents(citiesArray);
+}
+
+function renderAddCityForm() {
+  return `
+    <div class="modal-scroll admin-city-edit-modal">
+      <div class="modal-header admin-city-edit-header">
+        <div>
+          <span class="admin-modal-kicker">Ciudad</span>
+          <h2>&#x2795; A&ntilde;adir nueva ciudad</h2>
+        </div>
+        <button class="modal-close" id="admin-modal-close" aria-label="Cerrar">&#x2715;</button>
+      </div>
+      <div class="modal-body admin-city-edit-body">
         <form id="form-add-city" class="admin-form">
           <div class="form-group">
             <label>ID (min&uacute;sculas, sin espacios. Ej: 'kyoto')</label>
@@ -524,9 +695,9 @@ async function render() {
           </div>
           <div class="form-group">
             <label>Color Principal (Hex)</label>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <input type="color" id="city-color" value="#2563eb" style="width:50px; height:40px; padding:0; border:none; border-radius:4px; cursor:pointer;">
-              <span id="color-preview-text" style="font-family:monospace; padding:5px 10px; background:var(--bg-secondary); border-radius:4px;">#2563eb</span>
+            <div class="admin-color-field">
+              <input type="color" id="city-color" value="#2563eb">
+              <span id="color-preview-text">#2563eb</span>
             </div>
           </div>
           <div class="form-group">
@@ -545,63 +716,124 @@ async function render() {
             <label>Ideal para (Ej: 'Cultura, compras')</label>
             <input type="text" id="city-ideal-for" required>
           </div>
-          <div class="form-group" style="display:flex; flex-direction:row; gap:10px;">
-            <div style="flex:1;">
-            <label>D&iacute;as recomendados</label>
-              <input type="text" id="city-days" value="3 d&iacute;as" required style="width:100%;">
+          <div class="admin-form-grid compact">
+            <div class="form-group">
+              <label>D&iacute;as recomendados</label>
+              <input type="text" id="city-days" value="3 d&iacute;as" required>
             </div>
-            <div style="flex:2;">
+            <div class="form-group">
               <label>Zonas (separadas por coma)</label>
-              <input type="text" id="city-zones" placeholder="Centro, Afueras" required style="width:100%;">
+              <input type="text" id="city-zones" placeholder="Centro, Afueras" required>
             </div>
           </div>
           <div class="form-group">
             <label>Destacados / Chips (separados por coma)</label>
-            <input type="text" id="city-highlights" placeholder="Templo antiguo, Calle principal..." style="width:100%;">
+            <input type="text" id="city-highlights" placeholder="Templo antiguo, Calle principal...">
           </div>
           <div class="form-group">
             <label>Coordenadas Centrales (Lat, Lng separadas por coma)</label>
             <input type="text" id="city-center" placeholder="35.6762, 139.6503" required>
           </div>
-          <button type="submit" class="filter-pill active">Guardar Ciudad</button>
+          <div class="admin-modal-actions">
+            <button type="button" class="filter-pill" id="admin-modal-cancel">Cancelar</button>
+            <button type="submit" class="filter-pill active">Guardar ciudad</button>
+          </div>
         </form>
       </div>
-
-      <!-- IMPORT CSV SECTION -->
-      <div class="admin-card" style="margin-top: 20px;">
-        <h3 style="display:flex; align-items:center; gap:10px;">
-          &#x1F4E5; Importaci&oacute;n/Exportaci&oacute;n masiva (Excel)
-          <button id="btn-csv-info" style="background:none;border:none;cursor:pointer;font-size:1.2rem;" title="Ver formato de campos">&#x2139;&#xFE0F;</button>
-        </h3>
-        <p style="color: var(--text-secondary); margin-bottom: 15px;">Importa actividades desde un archivo Excel (.xlsx) o CSV. Debe incluir las cabeceras exactas, en este orden, y usar IDs de ciudad existentes: ${formatInlineCodeList(getCityIdList(citiesArray))}.</p>
-        <p style="font-size: 0.8rem; background: var(--bg-secondary); padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-          <strong>Columnas soportadas:</strong> ${PLACE_IMPORT_EXPORT_FIELDS.join(', ')}</p>
-        <div style="display:flex; gap:10px; flex-wrap: wrap;">
-          <label class="maps-link-btn" style="background:var(--bg-secondary); color:var(--text-primary); cursor:pointer;">
-            &#x2B06;&#xFE0F; Importar Excel/CSV
-            <input type="file" id="input-csv" accept=".xlsx, .xls, .csv" style="display:none;">
-          </label>
-          <button id="btn-export-csv" class="maps-link-btn" style="background:var(--accent);">&#x2B07;&#xFE0F; Exportar lugares (Excel)</button>
-        </div>
-        <p id="csv-msg" style="margin-top:10px; font-weight:bold; color:var(--accent); display:none;"></p>
-      </div>
-      
-      <!-- STATS -->
-      <div style="margin-top: 30px; font-size: 0.9rem; color: var(--text-tertiary);">
-        Estado de la BD: ${citiesArray.length} ciudades registradas, ${placesArray.length} lugares en total.
-      </div>
-    </div>
-    
-    <!-- INFO MODAL -->
-    <div class="modal-overlay" id="admin-modal-overlay">
-      <div class="modal admin-modal" id="admin-modal"></div>
     </div>
   `;
+}
 
-  attachEvents(citiesArray);
+async function handleAddCitySubmit(event, modalOverlay) {
+  event.preventDefault();
+  const existingCities = sortCities(await getAll('cities'));
+  const coordsStr = document.getElementById('city-center').value.split(',');
+  const lat = parseFloat(coordsStr[0]);
+  const lng = parseFloat(coordsStr[1]);
+  const cityId = document.getElementById('city-id').value.trim().toLowerCase();
+
+  if (!CITY_ID_PATTERN.test(cityId)) {
+    showAdminToast('El ID de ciudad solo puede contener minusculas, numeros y guiones.', 'error');
+    return;
+  }
+
+  if (existingCities.some((city) => city.id === cityId)) {
+    showAdminToast('Ya existe una ciudad con ese ID.', 'error');
+    return;
+  }
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    showAdminToast('Las coordenadas centrales deben tener latitud y longitud validas.', 'error');
+    return;
+  }
+
+  const color = document.getElementById('city-color').value;
+  const zonesStr = document.getElementById('city-zones').value;
+  const zones = zonesStr.split(',').map(z => z.trim()).filter(z => z);
+  const highlightsStr = document.getElementById('city-highlights').value;
+  const highlights = highlightsStr.split(',').map(h => h.trim()).filter(h => h);
+
+  const newCity = {
+    id: cityId,
+    name: document.getElementById('city-name').value.trim(),
+    nameJa: document.getElementById('city-name-ja').value.trim(),
+    color: color,
+    gradient: `linear-gradient(135deg, ${color} 0%, #000 100%)`,
+    tagline: document.getElementById('city-tagline').value.trim(),
+    description: document.getElementById('city-description').value.trim(),
+    summary: document.getElementById('city-summary').value.trim(),
+    idealFor: document.getElementById('city-ideal-for').value.trim(),
+    recommendedDays: document.getElementById('city-days').value.trim() || '3 días',
+    zones: zones.length > 0 ? zones : ["Centro"],
+    highlights: highlights,
+    center: { lat, lng },
+    defaultZoom: 13,
+    sortOrder: (existingCities.at(-1)?.sortOrder ?? -1) + 1
+  };
+
+  await putAll('cities', [normalizeCityRecord(newCity, newCity.sortOrder)]);
+  modalOverlay?.classList.remove('open');
+  document.body.style.overflow = '';
+  showAdminToast('Ciudad añadida con éxito.');
+  render();
+}
+
+function openAddCityModal() {
+  const modalOverlay = document.getElementById('admin-modal-overlay');
+  const modal = document.getElementById('admin-modal');
+  if (!modalOverlay || !modal) return;
+
+  modal.innerHTML = renderAddCityForm();
+  modalOverlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  const colorInput = document.getElementById('city-color');
+  const colorText = document.getElementById('color-preview-text');
+  colorInput?.addEventListener('input', (event) => {
+    colorText.textContent = event.target.value;
+    colorText.style.color = event.target.value;
+  });
+
+  document.getElementById('admin-modal-close')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-modal-cancel')?.addEventListener('click', closeAdminModal);
+  document.getElementById('form-add-city')?.addEventListener('submit', (event) => handleAddCitySubmit(event, modalOverlay));
+  window.setTimeout(() => document.getElementById('city-id')?.focus(), 0);
 }
 
 function attachEvents(citiesArray = []) {
+  document.querySelectorAll('[data-admin-tab]').forEach((button) => {
+    button.addEventListener('click', () => setActiveAdminTab(button.dataset.adminTab));
+  });
+
+  document.querySelectorAll('[data-admin-tab-jump]').forEach((button) => {
+    button.addEventListener('click', () => setActiveAdminTab(button.dataset.adminTabJump));
+  });
+
+  document.getElementById('btn-add-city')?.addEventListener('click', openAddCityModal);
+
+  window.removeEventListener('hashchange', syncAdminTabsFromHash);
+  window.addEventListener('hashchange', syncAdminTabsFromHash);
+
   // Color picker preview
   const colorInput = document.getElementById('city-color');
   const colorText = document.getElementById('color-preview-text');
@@ -955,59 +1187,6 @@ function attachEvents(citiesArray = []) {
       }
     });
   });
-  // Add City
-  document.getElementById('form-add-city').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const existingCities = sortCities(await getAll('cities')); 
-    const coordsStr = document.getElementById('city-center').value.split(',');
-    const lat = parseFloat(coordsStr[0]);
-    const lng = parseFloat(coordsStr[1]);
-    const cityId = document.getElementById('city-id').value.trim().toLowerCase();
-
-    if (!CITY_ID_PATTERN.test(cityId)) {
-      alert('El ID de ciudad solo puede contener minusculas, numeros y guiones.');
-      return;
-    }
-
-    if (existingCities.some((city) => city.id === cityId)) {
-      alert('Ya existe una ciudad con ese ID.');
-      return;
-    }
-
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      alert('Las coordenadas centrales deben tener latitud y longitud validas.');
-      return;
-    }
-
-    const color = document.getElementById('city-color').value;
-    const zonesStr = document.getElementById('city-zones').value;
-    const zones = zonesStr.split(',').map(z => z.trim()).filter(z => z);
-    const highlightsStr = document.getElementById('city-highlights').value;
-    const highlights = highlightsStr.split(',').map(h => h.trim()).filter(h => h);
-    
-    const newCity = {
-      id: cityId,
-      name: document.getElementById('city-name').value.trim(),
-      nameJa: document.getElementById('city-name-ja').value.trim(),
-      color: color,
-      gradient: `linear-gradient(135deg, ${color} 0%, #000 100%)`,
-      tagline: document.getElementById('city-tagline').value.trim(),
-      description: document.getElementById('city-description').value.trim(),
-      summary: document.getElementById('city-summary').value.trim(),
-      idealFor: document.getElementById('city-ideal-for').value.trim(),
-      recommendedDays: document.getElementById('city-days').value.trim() || '3 días',
-      zones: zones.length > 0 ? zones : ["Centro"],
-      highlights: highlights,
-      center: { lat, lng },
-      defaultZoom: 13,
-      sortOrder: (existingCities.at(-1)?.sortOrder ?? -1) + 1
-    };
-
-    await putAll('cities', [normalizeCityRecord(newCity, newCity.sortOrder)]);
-        alert('Ciudad añadida con éxito');
-    render();
-  });
-
   // Import Excel/CSV
   const inputCsv = document.getElementById('input-csv');
   inputCsv.addEventListener('change', async (e) => {

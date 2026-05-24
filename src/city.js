@@ -742,6 +742,10 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
     const latValue = formLatLng?.lat ?? '';
     const lngValue = formLatLng?.lng ?? '';
     const generatedId = isEdit ? formPlace.id : buildAutoPlaceId(formPlace.name, formPlace.id);
+    const typeOptions = Array.from(new Set([
+      ...places.map((entry) => entry.type).filter(Boolean),
+      formPlace.type
+    ].filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'es'));
 
     return `<div class="modal-scroll">
       <div class="modal-handle"></div>
@@ -759,7 +763,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
           <div class="form-group"><label>Ciudad</label><input type="text" value="${cityMeta.name}" readonly style="background:#eee; cursor:not-allowed;"><input type="hidden" id="place-form-city-id" value="${cityMeta.id}"></div>
           <div class="form-group"><label>Nombre *</label><input type="text" id="place-form-name" value="${formPlace.name || ''}" required placeholder="Ej: Templo Senso-ji"></div>
           <div class="form-group"><label>Categor&iacute;a *</label><select id="place-form-category" required>${categories.map((category) => `<option value="${category.id}" ${formPlace.category === category.id ? 'selected' : ''}>${category.label}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Tipo *</label><input type="text" id="place-form-type" value="${formPlace.type || ''}" required placeholder="Ej: Templo, mirador, museo"></div>
+          <div class="form-group"><label>Tipo *</label><select id="place-form-type" required><option value="" ${formPlace.type ? '' : 'selected'} disabled>Selecciona un tipo</option>${typeOptions.map((type) => `<option value="${type}" ${formPlace.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></div>
           <div class="form-group"><label>Prioridad *</label><select id="place-form-priority" required>${Object.entries(priorityLabels).map(([value, config]) => `<option value="${value}" ${formPlace.priority === value ? 'selected' : ''}>${config.label}</option>`).join('')}</select></div>
           <div class="form-group"><label>Zona *</label><input type="text" id="place-form-zone" value="${formPlace.zone || ''}" required placeholder="Ej: Asakusa"></div>
           <div class="form-group"><label>Descripci&oacute;n *</label><textarea id="place-form-description" rows="3" required placeholder="Ej: Templo budista hist&oacute;rico con gran pagoda y acceso f&aacute;cil desde la estaci&oacute;n.">${formPlace.description || ''}</textarea></div>
