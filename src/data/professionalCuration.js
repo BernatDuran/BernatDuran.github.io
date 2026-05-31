@@ -1,4 +1,4 @@
-export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v4-pages-snapshot-2026-05-24';
+export const PROFESSIONAL_CURATION_VERSION = 'professional-curation-v5-backup-snapshot-2026-05-31';
 
 export const SCORE_OVERRIDES = {
   'tokyo-nakamise-dori': 8,

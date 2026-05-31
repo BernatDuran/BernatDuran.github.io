@@ -150,6 +150,7 @@ async function applyProfessionalCuration() {
     mapLinkStyle: currentGlobalSettings?.mapLinkStyle || 'smart'
   };
 
+  await putAll('cities', demoDataset.cities.map((city, index) => normalizeCityRecord(city, index)));
   await putAll('places', curatedPlaces);
   await putAll('planner', [...planner, ...customPlanner]);
   await putAll('settings', [

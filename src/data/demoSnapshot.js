@@ -1006,7 +1006,7 @@ export const demoSnapshot = {
       "bestTime": "mañana",
       "rainyFriendly": "false",
       "score": 10,
-      "requiresTicket": "true",
+      "requiresTicket": "false",
       "ticketInfo": "Entrada: 600 yen",
       "tips": "Los jardines son gratuitos y extensos. El museo interior recorre la historia de Osaka. Buenas vistas desde la planta 8. Entrada: 600 yen.",
       "comment": "Está bien, diría que hay buenas vistas. Se paga entrada"
@@ -2419,6 +2419,69 @@ export const demoSnapshot = {
       "comment": "Nos puede gustar"
     },
     {
+      "id": "tokyo-center-gai",
+      "name": "Center Gai",
+      "cityId": "tokyo",
+      "category": "barrios",
+      "type": "Calle",
+      "priority": "recommended",
+      "zone": "Shibuya",
+      "description": "Famosa zona peatonal situada en el corazón de Shibuya (Tokio), que parte desde la icónica estación Shibuya - Japan Travel",
+      "address": "12-3 Udagawacho, Shibuya, Tokyo 150-0042, Japón",
+      "lat": 35.6558857098,
+      "lng": 139.7000922,
+      "estimatedDuration": "1 h",
+      "bestTime": "cualquier-momento",
+      "rainyFriendly": "false",
+      "score": 7,
+      "requiresTicket": "false",
+      "ticketInfo": "",
+      "tips": "",
+      "comment": ""
+    },
+    {
+      "id": "tokyo-excursion-a-nikko",
+      "name": "Excursión a Nikko",
+      "cityId": "tokyo",
+      "category": "naturaleza",
+      "type": "Experiencia",
+      "priority": "must-see",
+      "zone": "Nikko",
+      "description": "Permite visitar una histórica ciudad de montaña famosa por sus impresionantes santuarios declarados Patrimonio de la Humanidad por la UNESCO y su espectacular naturaleza",
+      "address": "Nikkō, Prefectura de Tochigi 321-1261",
+      "lat": 36.719833,
+      "lng": 139.698167,
+      "estimatedDuration": "6h",
+      "bestTime": "cualquier-momento",
+      "rainyFriendly": "false",
+      "score": 9,
+      "requiresTicket": "false",
+      "ticketInfo": "",
+      "tips": "",
+      "comment": ""
+    },
+    {
+      "id": "tokyo-excursion-lago-kawaguchi",
+      "name": "Excursión lago Kawaguchi",
+      "cityId": "tokyo",
+      "category": "naturaleza",
+      "type": "Experiencia",
+      "priority": "must-see",
+      "zone": "Kawaguchi",
+      "description": "Es el más popular y desarrollado de los Cinco Lagos del Fuji, ubicado en la prefectura de Yamanashi, Japón. Es mundialmente famoso por ofrecer algunas de las mejores y más despejadas vistas del majestuoso Monte Fuji",
+      "address": "1070 Kodachi, Fujikawaguchiko, Minamitsuru District, Yamanashi 401-0302, Japón",
+      "lat": 35.515,
+      "lng": 138.756667,
+      "estimatedDuration": "5h",
+      "bestTime": "cualquier-momento",
+      "rainyFriendly": "false",
+      "score": "",
+      "requiresTicket": "false",
+      "ticketInfo": "",
+      "tips": "",
+      "comment": ""
+    },
+    {
       "id": "tokyo-ginza",
       "name": "Ginza (Barrio)",
       "cityId": "tokyo",
@@ -2878,6 +2941,27 @@ export const demoSnapshot = {
       "requiresTicket": "false",
       "ticketInfo": "Jardines Este: gratuitos. Interior: tour con reserva previa gratuita.",
       "tips": "Los jardines Este (East Gardens) son gratuitos y abiertos al público. Para visitar el palacio interior hay que reservar tour gratuito en la web de la Agencia de la Casa Imperial.",
+      "comment": ""
+    },
+    {
+      "id": "tokyo-parque-yoyogi",
+      "name": "Parque Yoyogi",
+      "cityId": "tokyo",
+      "category": "naturaleza",
+      "type": "Parque",
+      "priority": "recommended",
+      "zone": "Shibuya",
+      "description": "Uno de los mayores parques de la ciudad de Tokio. Se encuentra situado cerca de la estación de JR Harajuku y al lado del santuario Meiji, con lo que tiene una localización ideal.\n\nA diferencia de otros jardines japoneses más tradicionales, el parque Yoyogi no es sólo uno de los principales pulmones verdes de Tokio, sino también un lugar abierto y tranquilo donde los tokiotas pasean a sus mascotas, leen, descansan, bailan… Es el escenario perfecto para disfurtar de la naturaleza en la ciudad y observar la vida cotidiana tokiota en su faceta más creativa.",
+      "address": "2-1 Yoyogikamizonocho, Shibuya, Tokyo 151-0052, Japón",
+      "lat": 35.671975,
+      "lng": 139.697685,
+      "estimatedDuration": "1 h",
+      "bestTime": "cualquier-momento",
+      "rainyFriendly": "false",
+      "score": 7,
+      "requiresTicket": "false",
+      "ticketInfo": "",
+      "tips": "",
       "comment": ""
     },
     {
@@ -3366,7 +3450,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 6
+      "order": 16
     },
     {
       "placeId": "kyoto-eikando",
@@ -3422,7 +3506,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 21
+      "order": 48
     },
     {
       "placeId": "kyoto-hokanji",
@@ -3430,7 +3514,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 4
+      "order": 13
     },
     {
       "placeId": "kyoto-ishibe-koji",
@@ -3446,7 +3530,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 25
+      "order": 50
     },
     {
       "placeId": "kyoto-kiyamachi-street",
@@ -3470,7 +3554,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 19
+      "order": 46
     },
     {
       "placeId": "kyoto-maruyama-park",
@@ -3494,7 +3578,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 14
+      "order": 33
     },
     {
       "placeId": "kyoto-nanzenji",
@@ -3508,9 +3592,9 @@ export const demoSnapshot = {
       "placeId": "kyoto-nijo-castle",
       "cityId": "kyoto",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 23
+      "status": "planned",
+      "assignedDay": 8,
+      "order": 7
     },
     {
       "placeId": "kyoto-nishiki",
@@ -3542,7 +3626,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 11
+      "order": 27
     },
     {
       "placeId": "kyoto-ryoanji",
@@ -3550,7 +3634,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 16
+      "order": 39
     },
     {
       "placeId": "kyoto-sake-district",
@@ -3558,7 +3642,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 10
+      "order": 24
     },
     {
       "placeId": "kyoto-sannenzaka",
@@ -3590,7 +3674,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 18
+      "order": 45
     },
     {
       "placeId": "kyoto-togetsukyo",
@@ -3630,7 +3714,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 52
+      "order": 68
     },
     {
       "placeId": "osaka-abeno-harukas",
@@ -3644,9 +3728,9 @@ export const demoSnapshot = {
       "placeId": "osaka-ajinoya",
       "cityId": "osaka",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 50
+      "status": "planned",
+      "assignedDay": 3,
+      "order": 6
     },
     {
       "placeId": "osaka-aquarium",
@@ -3662,7 +3746,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 8
+      "order": 20
     },
     {
       "placeId": "osaka-castle",
@@ -3678,7 +3762,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 27
+      "order": 51
     },
     {
       "placeId": "osaka-den-den",
@@ -3694,7 +3778,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "planned",
       "assignedDay": 3,
-      "order": 7
+      "order": 8
     },
     {
       "placeId": "osaka-fukutaro",
@@ -3702,7 +3786,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 41
+      "order": 58
     },
     {
       "placeId": "osaka-gate-tower",
@@ -3710,7 +3794,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 42
+      "order": 59
     },
     {
       "placeId": "osaka-glico",
@@ -3718,7 +3802,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 15
+      "order": 36
     },
     {
       "placeId": "osaka-gorichan",
@@ -3726,7 +3810,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 54
+      "order": 70
     },
     {
       "placeId": "osaka-goryo",
@@ -3734,7 +3818,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 49
+      "order": 66
     },
     {
       "placeId": "osaka-grand-front-osaka",
@@ -3742,7 +3826,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 13
+      "order": 30
     },
     {
       "placeId": "osaka-hep-five",
@@ -3750,7 +3834,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 43
+      "order": 60
     },
     {
       "placeId": "osaka-hozenji",
@@ -3758,7 +3842,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "planned",
       "assignedDay": 3,
-      "order": 6
+      "order": 7
     },
     {
       "placeId": "osaka-kiji",
@@ -3766,7 +3850,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 33
+      "order": 53
     },
     {
       "placeId": "osaka-kuromon",
@@ -3790,7 +3874,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 22
+      "order": 49
     },
     {
       "placeId": "osaka-museum-history",
@@ -3798,7 +3882,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 46
+      "order": 63
     },
     {
       "placeId": "osaka-nakanoshima-okawa",
@@ -3814,7 +3898,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 17
+      "order": 42
     },
     {
       "placeId": "osaka-namba-parks",
@@ -3838,7 +3922,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 40
+      "order": 57
     },
     {
       "placeId": "osaka-okonomiyaki-namba-dotonbori",
@@ -3846,7 +3930,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 47
+      "order": 64
     },
     {
       "placeId": "osaka-orange-street",
@@ -3854,7 +3938,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 20
+      "order": 47
     },
     {
       "placeId": "osaka-ramen-udon-flex",
@@ -3862,7 +3946,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 44
+      "order": 61
     },
     {
       "placeId": "osaka-rikuro",
@@ -3894,7 +3978,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 35
+      "order": 54
     },
     {
       "placeId": "osaka-station-city",
@@ -3902,7 +3986,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 2
+      "order": 7
     },
     {
       "placeId": "osaka-sumiyoshi",
@@ -3918,7 +4002,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 39
+      "order": 56
     },
     {
       "placeId": "osaka-tempozan",
@@ -3926,7 +4010,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 45
+      "order": 62
     },
     {
       "placeId": "osaka-tendon-makino",
@@ -3934,7 +4018,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 51
+      "order": 67
     },
     {
       "placeId": "osaka-tenma-izakaya-night",
@@ -3958,7 +4042,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 30
+      "order": 52
     },
     {
       "placeId": "osaka-tombori-river-cruise",
@@ -3966,7 +4050,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 48
+      "order": 65
     },
     {
       "placeId": "osaka-tsutenkaku",
@@ -3990,7 +4074,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "planned",
       "assignedDay": 3,
-      "order": 8
+      "order": 9
     },
     {
       "placeId": "osaka-usj",
@@ -4006,7 +4090,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 38
+      "order": 55
     },
     {
       "placeId": "osaka-yp-ryu",
@@ -4014,7 +4098,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 53
+      "order": 69
     },
     {
       "placeId": "takayama-ceremonia-del-te",
@@ -4030,7 +4114,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 0
+      "order": 1
     },
     {
       "placeId": "takayama-hida-beef",
@@ -4054,7 +4138,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "planned",
       "assignedDay": 12,
-      "order": 1
+      "order": 2
     },
     {
       "placeId": "takayama-higashiyama-walking-course",
@@ -4134,7 +4218,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 2
+      "order": 9
     },
     {
       "placeId": "takayama-shirakawago-day-trip",
@@ -4150,7 +4234,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 1
+      "order": 4
     },
     {
       "placeId": "tokyo-3d-cat-billboard",
@@ -4158,23 +4242,23 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 57
+      "order": 31
     },
     {
       "placeId": "tokyo-akihabara",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 17,
-      "order": 0
+      "assignedDay": 16,
+      "order": 4
     },
     {
       "placeId": "tokyo-ameyoko",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 56
+      "status": "planned",
+      "assignedDay": 16,
+      "order": 2
     },
     {
       "placeId": "tokyo-asakusa-sweets",
@@ -4182,7 +4266,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 58
+      "order": 32
     },
     {
       "placeId": "tokyo-bandai-museum",
@@ -4190,31 +4274,55 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 59
+      "order": 34
     },
     {
       "placeId": "tokyo-benten-do",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 60
+      "status": "planned",
+      "assignedDay": 16,
+      "order": 1
     },
     {
       "placeId": "tokyo-bic-camera",
       "cityId": "tokyo",
       "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 3
+    },
+    {
+      "placeId": "tokyo-center-gai",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 6
+    },
+    {
+      "placeId": "tokyo-excursion-a-nikko",
+      "cityId": "tokyo",
+      "favorite": false,
       "status": "planned",
       "assignedDay": 17,
-      "order": 3
+      "order": 0
+    },
+    {
+      "placeId": "tokyo-excursion-lago-kawaguchi",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 15,
+      "order": 0
     },
     {
       "placeId": "tokyo-ginza",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 61
+      "status": "planned",
+      "assignedDay": 14,
+      "order": 2
     },
     {
       "placeId": "tokyo-godzilla-head",
@@ -4222,31 +4330,31 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 62
+      "order": 5
     },
     {
       "placeId": "tokyo-golden-gai",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 12,
-      "order": 1
+      "assignedDay": 13,
+      "order": 8
     },
     {
       "placeId": "tokyo-hachiko",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 63
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 5
     },
     {
       "placeId": "tokyo-hoppy-street",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "planned",
-      "assignedDay": 13,
-      "order": 4
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 19
     },
     {
       "placeId": "tokyo-ikebukuro",
@@ -4254,23 +4362,23 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 24
+      "order": 6
     },
     {
       "placeId": "tokyo-kabukicho",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 64
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 9
     },
     {
       "placeId": "tokyo-kappabashi",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "planned",
-      "assignedDay": 13,
-      "order": 0
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 21
     },
     {
       "placeId": "tokyo-kiddy-land",
@@ -4278,7 +4386,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 65
+      "order": 15
     },
     {
       "placeId": "tokyo-kiyomizu-kannondo",
@@ -4286,31 +4394,31 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 66
+      "order": 8
     },
     {
       "placeId": "tokyo-mega-donki",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "planned",
-      "assignedDay": 14,
-      "order": 3
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 10
     },
     {
       "placeId": "tokyo-meiji-jingu",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 14,
-      "order": 0
+      "assignedDay": 13,
+      "order": 1
     },
     {
       "placeId": "tokyo-metropolitan-govt",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 15,
-      "order": 3
+      "assignedDay": 13,
+      "order": 10
     },
     {
       "placeId": "tokyo-miyashita-park-doraemon",
@@ -4318,7 +4426,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 26
+      "order": 14
     },
     {
       "placeId": "tokyo-mt-takao",
@@ -4326,7 +4434,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 67
+      "order": 35
     },
     {
       "placeId": "tokyo-nakameguro",
@@ -4334,15 +4442,15 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 28
+      "order": 23
     },
     {
       "placeId": "tokyo-nakamise-dori",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 13,
-      "order": 2
+      "assignedDay": 12,
+      "order": 3
     },
     {
       "placeId": "tokyo-national-museum",
@@ -4350,14 +4458,14 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 68
+      "order": 37
     },
     {
       "placeId": "tokyo-odaiba",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 16,
+      "assignedDay": 14,
       "order": 1
     },
     {
@@ -4365,83 +4473,11 @@ export const demoSnapshot = {
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 12,
-      "order": 0
+      "assignedDay": 13,
+      "order": 7
     },
     {
       "placeId": "tokyo-omotesando",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 29
-    },
-    {
-      "placeId": "tokyo-palacio-imperial",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "planned",
-      "assignedDay": 17,
-      "order": 1
-    },
-    {
-      "placeId": "tokyo-roppongi-hills",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 31
-    },
-    {
-      "placeId": "tokyo-senso-ji",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "planned",
-      "assignedDay": 13,
-      "order": 1
-    },
-    {
-      "placeId": "tokyo-shibuya-crossing",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "planned",
-      "assignedDay": 14,
-      "order": 2
-    },
-    {
-      "placeId": "tokyo-shibuya-sky",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "planned",
-      "assignedDay": 14,
-      "order": 4
-    },
-    {
-      "placeId": "tokyo-shin-nakamise",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 32
-    },
-    {
-      "placeId": "tokyo-shinjuku-gyoen",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "planned",
-      "assignedDay": 15,
-      "order": 2
-    },
-    {
-      "placeId": "tokyo-shinjuku-karaoke",
-      "cityId": "tokyo",
-      "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 69
-    },
-    {
-      "placeId": "tokyo-skytree",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
@@ -4449,12 +4485,92 @@ export const demoSnapshot = {
       "order": 3
     },
     {
+      "placeId": "tokyo-palacio-imperial",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 17
+    },
+    {
+      "placeId": "tokyo-parque-yoyogi",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 0
+    },
+    {
+      "placeId": "tokyo-roppongi-hills",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 25
+    },
+    {
+      "placeId": "tokyo-senso-ji",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 12,
+      "order": 1
+    },
+    {
+      "placeId": "tokyo-shibuya-crossing",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 4
+    },
+    {
+      "placeId": "tokyo-shibuya-sky",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "planned",
+      "assignedDay": 13,
+      "order": 11
+    },
+    {
+      "placeId": "tokyo-shin-nakamise",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 12
+    },
+    {
+      "placeId": "tokyo-shinjuku-gyoen",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 18
+    },
+    {
+      "placeId": "tokyo-shinjuku-karaoke",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 38
+    },
+    {
+      "placeId": "tokyo-skytree",
+      "cityId": "tokyo",
+      "favorite": false,
+      "status": "in-tray",
+      "assignedDay": null,
+      "order": 22
+    },
+    {
       "placeId": "tokyo-sumida-park",
       "cityId": "tokyo",
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 70
+      "order": 40
     },
     {
       "placeId": "tokyo-sunshine-60-observatory",
@@ -4462,7 +4578,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 71
+      "order": 41
     },
     {
       "placeId": "tokyo-sunshine-aquarium",
@@ -4470,7 +4586,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 55
+      "order": 29
     },
     {
       "placeId": "tokyo-sunshine-city",
@@ -4478,14 +4594,14 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 34
+      "order": 26
     },
     {
       "placeId": "tokyo-super-potato",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "planned",
-      "assignedDay": 17,
+      "status": "in-tray",
+      "assignedDay": null,
       "order": 2
     },
     {
@@ -4493,15 +4609,15 @@ export const demoSnapshot = {
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 14,
-      "order": 1
+      "assignedDay": 13,
+      "order": 2
     },
     {
       "placeId": "tokyo-teamlab",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 16,
+      "assignedDay": 14,
       "order": 0
     },
     {
@@ -4510,7 +4626,7 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 36
+      "order": 28
     },
     {
       "placeId": "tokyo-toyosu-market",
@@ -4518,15 +4634,15 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 72
+      "order": 43
     },
     {
       "placeId": "tokyo-tsukiji-outer-market",
       "cityId": "tokyo",
       "favorite": false,
-      "status": "in-tray",
-      "assignedDay": null,
-      "order": 37
+      "status": "planned",
+      "assignedDay": 14,
+      "order": 3
     },
     {
       "placeId": "tokyo-tsukiji-uogashi",
@@ -4534,14 +4650,14 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 73
+      "order": 44
     },
     {
       "placeId": "tokyo-ueno-park",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 15,
+      "assignedDay": 16,
       "order": 0
     },
     {
@@ -4550,15 +4666,15 @@ export const demoSnapshot = {
       "favorite": false,
       "status": "in-tray",
       "assignedDay": null,
-      "order": 74
+      "order": 11
     },
     {
       "placeId": "tokyo-yanaka",
       "cityId": "tokyo",
       "favorite": false,
       "status": "planned",
-      "assignedDay": 15,
-      "order": 1
+      "assignedDay": 16,
+      "order": 3
     }
   ]
 };
