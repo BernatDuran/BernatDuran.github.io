@@ -259,3 +259,24 @@ export function getGoogleMapsRouteUrl(entries = [], options = {}) {
 
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
+
+export function getGoogleMapsRouteUrls(entries = [], options = {}) {
+  const maxWaypoints = options.maxWaypoints ?? 8;
+  const maxPoints = maxWaypoints + 2;
+  const validEntries = entries.filter((entry) => entry.latLng || getPlaceLatLng(entry.place));
+  if (validEntries.length < 2) return [];
+  if (validEntries.length <= maxPoints) {
+    const url = getGoogleMapsRouteUrl(validEntries, options);
+    return url ? [url] : [];
+  }
+
+  const urls = [];
+  let startIndex = 0;
+  while (startIndex < validEntries.length - 1) {
+    const chunk = validEntries.slice(startIndex, startIndex + maxPoints);
+    const url = getGoogleMapsRouteUrl(chunk, options);
+    if (url) urls.push(url);
+    startIndex += maxPoints - 1;
+  }
+  return urls;
+}

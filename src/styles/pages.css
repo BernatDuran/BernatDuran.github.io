@@ -201,12 +201,42 @@ body { padding-top: var(--nav-height); }
 .admin-icon-btn:hover { border-color: var(--border); background: #fff; color: var(--text-primary); transform: translateY(-1px); }
 .admin-danger-zone { border-color: #fecaca; background: linear-gradient(135deg, #fff 0%, #fff7f7 100%); }
 .admin-danger-note { margin-top: var(--space-md); color: #7f1d1d; }
+.admin-location-toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md); }
+.admin-location-toolbar h3,
+.admin-location-toolbar p { margin: 0; }
+.admin-location-toolbar p { margin-top: 4px; color: var(--text-secondary); font-size: 0.86rem; }
+.admin-location-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-md); }
+.admin-location-group { padding: var(--space-md); border: 1px solid var(--border-light); border-radius: var(--radius-lg); background: #fff; box-shadow: var(--shadow-sm); }
+.admin-location-list { display: flex; flex-direction: column; gap: 8px; }
+.admin-location-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: var(--bg-primary); }
+.admin-location-row.is-inactive { opacity: .62; }
+.admin-location-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-secondary); }
+.admin-location-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.admin-location-main strong { color: var(--text-primary); }
+.admin-location-main span,
+.admin-location-main small { color: var(--text-secondary); font-size: .78rem; overflow-wrap: anywhere; }
+.admin-location-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.admin-location-inactive-badge { padding: 3px 7px; border-radius: var(--radius-full); background: #f3f4f6; color: #6b7280; font-size: .68rem; font-weight: 800; }
+.admin-day-plan-card { margin-top: var(--space-md); }
+.admin-location-bulk { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; margin-bottom: var(--space-md); padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: var(--bg-secondary); }
+.admin-location-bulk label { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); font-size: .72rem; font-weight: 800; }
+.admin-location-bulk input,
+.admin-location-bulk select,
+.admin-day-location-row select { min-height: 34px; padding: 6px 8px; border: 1px solid var(--border-light); border-radius: var(--radius-md); background: #fff; }
+.admin-location-bulk-select { min-width: 220px; flex: 1; }
+.admin-check-inline { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 7px !important; color: var(--text-secondary); font-size: .8rem; font-weight: 700; }
+.admin-day-location-list { display: flex; flex-direction: column; gap: 7px; }
+.admin-day-location-row { display: grid; grid-template-columns: 70px repeat(3, minmax(150px, 1fr)); gap: 8px; align-items: end; padding: 9px 10px; border-bottom: 1px solid var(--border-light); }
+.admin-day-location-row label { display: flex; flex-direction: column; gap: 4px; color: var(--text-secondary); font-size: .7rem; font-weight: 800; }
 
 @media (max-width: 1024px) {
   .admin-tab { min-width: max-content; }
   .admin-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-city-layout,
   .admin-data-grid { grid-template-columns: 1fr; }
+  .admin-location-grid { grid-template-columns: 1fr; }
+  .admin-day-location-row { grid-template-columns: 60px repeat(2, minmax(140px, 1fr)); }
+  .admin-day-location-row label:last-child { grid-column: 2 / -1; }
 }
 
 @media (max-width: 768px) {
@@ -221,5 +251,12 @@ body { padding-top: var(--nav-height); }
   .admin-sticky-actions .admin-inline-msg { margin-right: 0; }
   .admin-action-row { align-items: stretch; }
   .admin-action-btn { flex: 1 1 auto; }
+  .admin-location-toolbar,
+  .admin-location-row { align-items: stretch; }
+  .admin-location-toolbar { flex-direction: column; }
+  .admin-location-row { grid-template-columns: auto minmax(0, 1fr); }
+  .admin-location-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .admin-day-location-row { grid-template-columns: 1fr; }
+  .admin-day-location-row label:last-child { grid-column: auto; }
 }
 

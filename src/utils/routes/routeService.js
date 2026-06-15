@@ -5,6 +5,7 @@ import {
 } from './routeCache.js';
 import { normalizeRouteResponse } from './routeFormatters.js';
 import { getPlaceLatLng } from '../placeData.js';
+import { normalizeTravelMode } from '../locationData.js';
 
 const ROUTE_TIMEOUT_MS = 12000;
 
@@ -113,6 +114,28 @@ export async function getWalkingRoutesForEntries(entries, options = {}) {
   for (let index = 1; index < entries.length; index += 1) {
     const originEntry = entries[index - 1];
     const destinationEntry = entries[index];
+    const travelMode = normalizeTravelMode(
+      destinationEntry.travelModeFromPrevious || destinationEntry.item?.travelModeFromPrevious
+    );
+    if (travelMode !== 'walking') {
+      results.push({
+        originEntry,
+        destinationEntry,
+        route: {
+          id: `route:v1:${travelMode}:${originEntry.place.id}:${destinationEntry.place.id}`,
+          mode: travelMode,
+          originPlaceId: originEntry.place.id,
+          destinationPlaceId: destinationEntry.place.id,
+          status: 'non-walking',
+          distanceMeters: null,
+          durationSeconds: null,
+          distanceText: null,
+          durationText: null,
+          latLngs: []
+        }
+      });
+      continue;
+    }
     const route = await getWalkingRouteBetweenPlaces(originEntry.place, destinationEntry.place, options);
     results.push({
       originEntry,

@@ -26,6 +26,7 @@ export function createRoutePolyline(entries = [], options = {}) {
 function createWalkingSegmentPolyline(segment, options = {}) {
   const route = segment.route;
   const hasRealRoute = hasUsablePolyline(route);
+  const isWalking = (segment.travelMode || route?.mode || 'walking') === 'walking';
   const latLngs = hasRealRoute
     ? route.latLngs
     : [segment.originEntry, segment.destinationEntry]
@@ -37,11 +38,11 @@ function createWalkingSegmentPolyline(segment, options = {}) {
 
   return L.polyline(latLngs, {
     color: options.color || '#e94560',
-    weight: hasRealRoute ? 4 : 3,
-    opacity: hasRealRoute ? 0.88 : 0.38,
+    weight: hasRealRoute ? 4 : isWalking ? 3 : 4,
+    opacity: hasRealRoute ? 0.88 : isWalking ? 0.38 : 0.72,
     lineJoin: 'round',
     lineCap: 'round',
-    dashArray: hasRealRoute ? null : '7 9'
+    dashArray: hasRealRoute ? null : isWalking ? '7 9' : '3 7'
   });
 }
 

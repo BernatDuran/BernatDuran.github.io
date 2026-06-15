@@ -59,14 +59,28 @@ export function renderPlannerMarkers(map, entries = [], options = {}) {
   const layerGroup = options.layerGroup || L.layerGroup().addTo(map);
   clearMarkers(layerGroup);
 
+  const groups = new Map();
   entries.forEach((entry) => {
     const latLng = entry.latLng || getLatLngFromPlace(entry.place);
     if (!latLng) return;
+    const key = `${Number(latLng.lat).toFixed(6)}:${Number(latLng.lng).toFixed(6)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...entry, latLng });
+  });
+
+  groups.forEach((groupEntries) => {
+    const entry = groupEntries[0];
+    const latLng = entry.latLng;
+    const markerLabels = groupEntries.map((candidate) => {
+      const order = candidate.exportOrder || (candidate.item?.order ?? 0) + 1;
+      return options.scope === 'all' && candidate.day ? `${candidate.day}.${order}` : `${order}`;
+    });
 
     const icon = createNumberedMarkerIcon(entry.place, {
       color: entry.color,
       day: entry.day,
       order: entry.exportOrder || (entry.item?.order ?? 0) + 1,
+      label: markerLabels.join('/'),
       scope: options.scope
     });
 

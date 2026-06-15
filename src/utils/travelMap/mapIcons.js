@@ -29,12 +29,17 @@ export function createNumberedMarkerIcon(place, options = {}) {
   const color = options.color || '#e94560';
   const order = options.order ?? options.exportOrder ?? 1;
   const day = options.day;
-  const label = options.scope === 'all' && day ? `${day}.${order}` : `${order}`;
+  const label = options.label || (options.scope === 'all' && day ? `${day}.${order}` : `${order}`);
+  const locationIcon = place?.entityType === 'location'
+    ? place.plannerKind === 'accommodation' ? '&#x1F3E8;' : '&#x1F689;'
+    : '';
+  const locationClass = place?.entityType === 'location' ? ` travel-marker-${place.plannerKind}` : '';
 
   return L.divIcon({
     className: 'travel-marker-numbered-leaflet',
-    html: `<div class="travel-marker travel-marker-numbered" style="--travel-marker-color:${escapeHtml(color)}">
+    html: `<div class="travel-marker travel-marker-numbered${locationClass}" style="--travel-marker-color:${escapeHtml(color)}">
       <span class="travel-marker-order">${escapeHtml(label)}</span>
+      ${locationIcon ? `<span class="travel-marker-location-icon">${locationIcon}</span>` : ''}
     </div>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17],

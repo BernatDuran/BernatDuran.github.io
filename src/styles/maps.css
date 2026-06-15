@@ -345,6 +345,8 @@
 .planner-map-route-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
   margin-top: -4px;
 }
 
@@ -368,6 +370,22 @@
   opacity: 0.5;
   pointer-events: none;
 }
+
+.travel-marker-location-icon {
+  position: absolute;
+  right: -9px;
+  bottom: -8px;
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f5f3ff;
+  font-size: 10px;
+  box-shadow: 0 3px 8px rgba(15,23,42,.18);
+}
+.travel-marker-numbered.travel-marker-transport .travel-marker-location-icon { background: #e0f2fe; }
 
 @media (max-width: 768px) {
   .travel-map-control-btn {

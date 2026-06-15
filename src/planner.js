@@ -2,10 +2,10 @@ import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
 import './styles/maps.css';
-import { getAll, putAll } from './utils/db.js';
+import { getAll, putAll, putManyByStore, remove } from './utils/db.js';
 import { categories, priorityLabels } from './data/cities.js';
 import { icons, formatScore, debounce, parseEstimatedDurationToMinutes, formatDurationMinutes } from './utils/helpers.js';
-import { initLeafletMap, renderPlaceMap, getGoogleMapsRouteUrl, getGoogleMapsUrl, renderPlannerTravelMap } from './utils/maps.js';
+import { initLeafletMap, renderPlaceMap, getGoogleMapsRouteUrls, getGoogleMapsUrl, renderPlannerTravelMap } from './utils/maps.js';
 import { setupPwa } from './utils/pwa.js';
 import Sortable from 'sortablejs';
 import { bindMobileNav, renderMobileMenu } from './utils/nav.js';
@@ -17,6 +17,24 @@ import { buildWalkingRouteCacheKey, getCachedWalkingRoute } from './utils/routes
 import { formatRouteDistance, formatRouteDuration } from './utils/routes/routeFormatters.js';
 import { hasUsablePolyline } from './utils/routes/routePolyline.js';
 import { getWalkingRoutesForEntries } from './utils/routes/routeService.js';
+import {
+  LOCATION_KINDS,
+  TRAVEL_MODES,
+  createPlannerStopId,
+  getLocationKindConfig,
+  getLocationSubtypeLabel,
+  getTravelModeConfig,
+  normalizeDayPlanRecord,
+  normalizeLocationRecord,
+  normalizePlannerStopRecord,
+  normalizeTravelMode
+} from './utils/locationData.js';
+import {
+  canConfigureEntryTravelMode,
+  composeDayItinerary,
+  getEntryTravelMode,
+  splitItineraryEntries
+} from './utils/itineraryData.js';
 
 setupPwa();
 
@@ -35,6 +53,9 @@ let _plannerItems = [];
 let _globalSettings = {};
 let _totalTripDays = 7;
 let _citiesArray = [];
+let _locations = [];
+let _dayPlans = [];
+let _plannerStops = [];
 let _viewMode = getPlannerViewModeFromUrl() || 'calendar';
 let _selectedMapScope = 'all';
 let _plannerFilterState = { search: '', cityId: '', priority: '', scoreBands: [] };
@@ -338,7 +359,10 @@ function formatDayLabel(dayNum) {
 }
 
 function getPlaceName(placeId) {
-  return _places.find((place) => place.id === placeId)?.name || 'Actividad';
+  const place = _places.find((candidate) => candidate.id === placeId);
+  if (place) return place.name;
+  const stop = _plannerStops.find((candidate) => candidate.id === placeId);
+  return getLocation(stop?.locationId)?.name || 'Elemento';
 }
 
 function getDropToastMessage(evt) {
@@ -487,6 +511,181 @@ function buildGroupedData(filteredPlaces = _places) {
   return groups;
 }
 
+function getComposedDayEntries(day, groups) {
+  return composeDayItinerary({
+    day,
+    activityEntries: groups[day] || [],
+    locations: _locations,
+    dayPlans: _dayPlans,
+    plannerStops: _plannerStops
+  });
+}
+
+function getLocation(locationId) {
+  return _locations.find((location) => location.id === locationId) || null;
+}
+
+function getDayPlan(day) {
+  return _dayPlans.find((plan) => Number(plan.day) === Number(day))
+    || normalizeDayPlanRecord({ day });
+}
+
+function getPlannerStop(stopId) {
+  return _plannerStops.find((stop) => stop.id === stopId) || null;
+}
+
+function getPlannerItem(placeId) {
+  return _plannerItems.find((item) => item.placeId === placeId) || null;
+}
+
+function getLocationPickerTypeLabel(location = {}) {
+  return getLocationSubtypeLabel(location.kind, location.subtype)
+    || getLocationKindConfig(location.kind).label;
+}
+
+function getLocationPickerMeta(location = {}) {
+  return [
+    getCityName(location.cityId),
+    getLocationPickerTypeLabel(location)
+  ].filter(Boolean).join(' - ');
+}
+
+function renderPlannerLocationPicker({
+  id,
+  selectedId = '',
+  kind = null,
+  placeholder = 'Selecciona una ubicacion',
+  selectedMeta = 'none'
+} = {}) {
+  const locations = _locations
+    .filter((location) => location.active !== false)
+    .filter((location) => !kind || location.kind === kind)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'));
+  const selectedLocation = locations.find((location) => location.id === selectedId) || null;
+  const selectedLabel = selectedLocation?.name || placeholder;
+  const selectedMetaText = selectedMeta === 'city' && selectedLocation
+    ? getCityName(selectedLocation.cityId)
+    : '';
+
+  const optionHtml = locations.map((location) => {
+    const cityName = getCityName(location.cityId);
+    return `
+      <button type="button"
+              class="planner-location-picker-option ${location.id === selectedId ? 'is-selected' : ''}"
+              role="option"
+              aria-selected="${location.id === selectedId ? 'true' : 'false'}"
+              data-location-picker-option
+              data-location-id="${escapeHtml(location.id)}"
+              data-location-label="${escapeHtml(location.name)}"
+              data-location-selected-meta="${escapeHtml(selectedMeta === 'city' ? cityName : '')}">
+        <span class="planner-location-picker-option-name">${escapeHtml(location.name)}</span>
+        <span class="planner-location-picker-option-meta">${escapeHtml(getLocationPickerMeta(location))}</span>
+      </button>
+    `;
+  }).join('');
+
+  return `
+    <div class="planner-location-picker" data-location-picker>
+      <input type="hidden" id="${escapeHtml(id)}" value="${escapeHtml(selectedLocation?.id || '')}">
+      <button type="button"
+              class="planner-location-picker-trigger"
+              data-location-picker-toggle
+              aria-haspopup="listbox"
+              aria-expanded="false">
+        <span class="planner-location-picker-selected" data-location-picker-selected>${escapeHtml(selectedLabel)}</span>
+        <span class="planner-location-picker-selected-meta" data-location-picker-selected-meta>${escapeHtml(selectedMetaText)}</span>
+        <span class="planner-location-picker-caret" aria-hidden="true">v</span>
+      </button>
+      <div class="planner-location-picker-menu" role="listbox">
+        <button type="button"
+                class="planner-location-picker-option ${selectedLocation ? '' : 'is-selected'}"
+                role="option"
+                aria-selected="${selectedLocation ? 'false' : 'true'}"
+                data-location-picker-option
+                data-location-id=""
+                data-location-label="${escapeHtml(placeholder)}"
+                data-location-selected-meta="">
+          <span class="planner-location-picker-option-name">${escapeHtml(placeholder)}</span>
+          <span class="planner-location-picker-option-meta">Sin asignar</span>
+        </button>
+        ${optionHtml}
+      </div>
+    </div>
+  `;
+}
+
+function renderTravelModeSelect(entryType, entryId, value, options = {}) {
+  if (options.hidden) return '';
+  const mode = getTravelModeConfig(value);
+  return `
+    <label class="planner-entry-mode" title="Modo de llegada desde el punto anterior">
+      <span class="planner-entry-mode-icon">${mode.icon}</span>
+      <select data-entry-mode="${entryType}" data-entry-id="${escapeHtml(entryId)}" data-entry-day="${options.day || ''}" aria-label="Modo de llegada">
+        ${TRAVEL_MODES.map((entry) => `<option value="${entry.id}" ${entry.id === mode.id ? 'selected' : ''}>${entry.label}</option>`).join('')}
+      </select>
+    </label>
+  `;
+}
+
+function renderLocationEntryCard(entry, day) {
+  const { location, entryType } = entry;
+  const kind = getLocationKindConfig(location.kind);
+  const isAnchor = entryType === 'day-start' || entryType === 'day-end';
+  const isStart = entryType === 'day-start';
+  const stop = entry.stop;
+  const label = isStart
+    ? 'Inicio del dia'
+    : entryType === 'day-end'
+      ? 'Final del dia'
+      : stop?.purpose || 'Parada logistica';
+  const subtype = getLocationSubtypeLabel(location.kind, location.subtype);
+  const classes = [
+    'planner-mini-card',
+    'planner-location-card',
+    `planner-location-${location.kind}`,
+    isAnchor ? 'planner-anchor-card' : 'planner-sortable-card'
+  ].join(' ');
+  const dataAttributes = isAnchor
+    ? `data-entry-type="${entryType}" data-entry-id="${entry.entryId}"`
+    : `data-entry-type="location-stop" data-entry-id="${escapeHtml(stop.id)}" data-id="${escapeHtml(stop.id)}"`;
+
+  return `
+    <div class="${classes}" ${dataAttributes} data-location-id="${escapeHtml(location.id)}">
+      <span class="planner-mini-cat-icon planner-location-kind-icon">${kind.icon}</span>
+      <div class="planner-mini-info">
+        <div class="planner-location-kicker">${escapeHtml(label)}</div>
+        <div class="planner-mini-name">${escapeHtml(location.name)}</div>
+        <div class="planner-mini-meta">
+          <span>${escapeHtml(subtype)}</span>
+          ${stop?.durationMinutes ? `<span class="planner-mini-sep">&middot;</span><span>${stop.durationMinutes} min</span>` : ''}
+          ${stop?.note ? `<span class="planner-mini-sep">&middot;</span><span>${escapeHtml(stop.note)}</span>` : ''}
+        </div>
+      </div>
+      <div class="planner-location-card-actions">
+        ${renderTravelModeSelect(
+          isAnchor ? entryType : 'location-stop',
+          isAnchor ? String(day) : stop.id,
+          entry.travelModeFromPrevious,
+          { day, hidden: isStart }
+        )}
+        ${isAnchor
+          ? `<button type="button" class="planner-location-action" data-day-plan-open="${day}" title="Configurar inicio y final">Editar</button>`
+          : `
+            <button type="button" class="planner-location-action" data-stop-edit="${escapeHtml(stop.id)}">Editar</button>
+            <button type="button" class="planner-location-action is-danger" data-stop-delete="${escapeHtml(stop.id)}">Quitar</button>
+          `}
+      </div>
+    </div>
+  `;
+}
+
+function renderPlannerEntryCard(entry, day) {
+  if (entry.entryType === 'activity') {
+    return renderMiniCard(entry.place, entry.item, { day });
+  }
+  return renderLocationEntryCard(entry, day);
+}
+
 function renderPlannerPriorityFilters(iconOnly = false) {
   return Object.entries(priorityLabels)
     .map(([key, val]) => iconOnly
@@ -606,7 +805,7 @@ function buildMapModel(scope, groups) {
 
   const scopedEntries = [];
   selectedDays.forEach((day) => {
-    (groups[day] || []).forEach((entry) => scopedEntries.push({ ...entry, day }));
+    getComposedDayEntries(day, groups).forEach((entry) => scopedEntries.push({ ...entry, day }));
   });
 
   const mappableEntries = [];
@@ -658,7 +857,7 @@ function buildMapModel(scope, groups) {
   };
 }
 
-function renderMiniCard(place, plannerItem) {
+function renderMiniCard(place, plannerItem, options = {}) {
   const cat = categories.find((c) => c.id === place.category);
   const prio = priorityLabels[place.priority];
   const cfg = getStatusConfig(plannerItem);
@@ -687,8 +886,8 @@ function renderMiniCard(place, plannerItem) {
   ].filter(Boolean);
 
   return `
-    <div class="planner-mini-card ${isDiscarded ? 'planner-card-discarded' : ''}"
-         data-id="${place.id}" data-place-id="${place.id}" data-clickable-card="true">
+    <div class="planner-mini-card planner-sortable-card ${isDiscarded ? 'planner-card-discarded' : ''}"
+         data-id="${place.id}" data-entry-id="${place.id}" data-entry-type="activity" data-place-id="${place.id}" data-clickable-card="true">
       <span class="planner-mini-cat-icon" style="font-size:1rem;">${cat?.icon || '&#x1F4CD;'}</span>
       <div class="planner-mini-info">
         <div class="planner-mini-name">${place.name}</div>
@@ -697,6 +896,10 @@ function renderMiniCard(place, plannerItem) {
         </div>
       </div>
       <div style="display:flex; align-items:center; flex-shrink:0;">
+        ${renderTravelModeSelect('activity', place.id, plannerItem?.travelModeFromPrevious, {
+          day: options.day,
+          hidden: !options.day || !canConfigureEntryTravelMode({ entryType: 'activity', place, item: plannerItem })
+        })}
         ${scoreText ? `<span style="font-size:0.7rem; font-weight:bold; color:var(--text-secondary); margin-right:6px;">&#x2B50; ${scoreText}</span>` : ''}
         <button class="planner-chip-trigger"
                 data-chip-place-id="${place.id}"
@@ -709,10 +912,11 @@ function renderMiniCard(place, plannerItem) {
 }
 
 function renderWalkingRouteLeg(segment) {
+  const mode = getTravelModeConfig(segment.travelMode);
   return `
     <div class="walking-route-leg ${getWalkingRouteStatusClass(segment)}">
       <span class="walking-route-leg-arrow">&darr;</span>
-      <span class="walking-route-leg-icon">&#x1F6B6;</span>
+      <span class="walking-route-leg-icon">${mode.icon}</span>
       <span>${getWalkingRouteStatusText(segment)}</span>
     </div>
   `;
@@ -726,13 +930,11 @@ function renderRouteValidationToggle(day, options = {}) {
     isChecked ? 'is-validated' : '',
     readonly ? 'is-readonly' : ''
   ].filter(Boolean).join(' ');
-  const label = 'Ruta';
   const title = isChecked ? 'Ruta validada' : 'Validar ruta antes de calcular trayectos a pie';
   return `
-    <label class="${className}" title="${title}">
+    <label class="${className}" title="${title}" aria-label="${title}">
       <input type="checkbox" data-route-validation-day="${day}" ${isChecked ? 'checked' : ''} ${readonly ? 'disabled' : ''}>
       <span class="planner-route-validation-box" aria-hidden="true">&#x2713;</span>
-      <span>${label}</span>
     </label>
   `;
 }
@@ -744,7 +946,7 @@ function renderDayCoordinateWarning(entries) {
 }
 
 function renderDayPlannerCards(entries, day) {
-  if (!entries.length) return `<div class="planner-empty-day">Sin actividades asignadas</div>`;
+  if (!entries.length) return `<div class="planner-empty-day">Sin actividades ni ubicaciones asignadas</div>`;
 
   const route = {
     day,
@@ -757,17 +959,16 @@ function renderDayPlannerCards(entries, day) {
   };
   const walkingSegments = buildWalkingRouteSegmentsForRoute(route);
 
-  return entries.map(({ place, item }, index) => `
-    ${renderMiniCard(place, item)}
+  return entries.map((entry, index) => `
+    ${renderPlannerEntryCard(entry, day)}
     ${walkingSegments[index] ? renderWalkingRouteLeg(walkingSegments[index]) : ''}
   `).join('');
 }
 
 function renderDayMapSummaryButton(day) {
   return `
-    <button type="button" class="planner-day-map-btn" data-day-map-open="${day}" aria-label="Abrir mapa del Dia ${day}">
+    <button type="button" class="planner-day-map-btn planner-day-icon-btn" data-day-map-open="${day}" aria-label="Abrir mapa del Dia ${day}" title="Abrir mapa del Dia ${day}">
       <span class="planner-day-map-btn-icon">&#x1F5FA;&#xFE0F;</span>
-      <span>Mapa</span>
     </button>
   `;
 }
@@ -926,7 +1127,7 @@ function renderMapMissingList(model) {
 
   return `
     <div class="planner-map-missing">
-      <h4>Actividades sin coordenadas (${model.missingCount})</h4>
+      <h4>Puntos sin coordenadas (${model.missingCount})</h4>
       <ul>${items}</ul>
       ${more}
     </div>
@@ -1033,15 +1234,18 @@ function buildWalkingRouteSegmentsForRoute(route) {
     const destinationEntry = entries[index];
     const originPlace = originEntry.place;
     const destinationPlace = destinationEntry.place;
+    const travelMode = getEntryTravelMode(destinationEntry);
     const cacheKey = buildWalkingRouteCacheKey(originPlace.id, destinationPlace.id);
-    const cachedRoute = _walkingRouteResults.get(cacheKey) || getCachedWalkingRoute(originPlace.id, destinationPlace.id);
+    const cachedRoute = travelMode === 'walking'
+      ? _walkingRouteResults.get(cacheKey) || getCachedWalkingRoute(originPlace.id, destinationPlace.id)
+      : null;
     const hasCoordinates = hasValidCoordinates(originPlace) && hasValidCoordinates(destinationPlace);
     const routeData = cachedRoute || {
       id: cacheKey,
-      mode: 'walking',
+      mode: travelMode,
       originPlaceId: originPlace.id,
       destinationPlaceId: destinationPlace.id,
-      status: hasCoordinates ? 'pending' : 'missing-coordinates',
+      status: !hasCoordinates ? 'missing-coordinates' : travelMode === 'walking' ? 'pending' : 'non-walking',
       distanceMeters: null,
       durationSeconds: null,
       distanceText: null,
@@ -1054,6 +1258,7 @@ function buildWalkingRouteSegmentsForRoute(route) {
       color: route.color,
       originEntry,
       destinationEntry,
+      travelMode,
       fromOrder: originEntry.exportOrder || index,
       toOrder: destinationEntry.exportOrder || index + 1,
       linearDistanceKm: getLinearDistanceKmBetweenPlaces(originPlace, destinationPlace),
@@ -1076,6 +1281,8 @@ function buildWalkingRouteSummary(segments) {
       summary.missingCount += 1;
     } else if (route?.status === 'error') {
       summary.errorCount += 1;
+    } else if (route?.status === 'non-walking') {
+      summary.nonWalkingCount += 1;
     } else {
       summary.pendingCount += 1;
     }
@@ -1086,6 +1293,7 @@ function buildWalkingRouteSummary(segments) {
     pendingCount: 0,
     errorCount: 0,
     missingCount: 0,
+    nonWalkingCount: 0,
     distanceMeters: 0,
     durationSeconds: 0
   });
@@ -1102,7 +1310,7 @@ function buildWalkingRouteModel(routes) {
 
 function getCalculableRouteDays(model) {
   return (model.routes || [])
-    .filter((route) => (route.allEntries || []).length >= 2)
+    .filter((route) => (route.walkingSegments || []).some((segment) => segment.travelMode === 'walking'))
     .map((route) => route.day);
 }
 
@@ -1117,7 +1325,7 @@ function getRouteValidationModel(model) {
 }
 
 function hasOnlyCalculatedWalkingSegments(model) {
-  const segments = model.walking?.segments || [];
+  const segments = (model.walking?.segments || []).filter((segment) => segment.travelMode === 'walking');
   return segments.length > 0 && segments.every((segment) => segment.route?.status === 'ok');
 }
 
@@ -1176,7 +1384,7 @@ function renderDistanceSummary(model) {
 
   return `
     <div class="planner-map-distance-summary" aria-label="Resumen de distancia lineal">
-      <div class="planner-map-distance-stat"><strong>${model.plannedCount}</strong><span>actividades</span></div>
+      <div class="planner-map-distance-stat"><strong>${model.plannedCount}</strong><span>puntos de ruta</span></div>
       <div class="planner-map-distance-stat"><strong>${summary.segmentCount}</strong><span>tramos</span></div>
       <div class="planner-map-distance-stat"><strong>${formatTotalDistanceKm(summary.totalDistanceKm)}</strong><span>distancia lineal total</span></div>
       <div class="planner-map-distance-stat"><strong>${longestText}</strong><span>tramo m&aacute;s largo</span></div>
@@ -1186,6 +1394,13 @@ function renderDistanceSummary(model) {
 
 function getWalkingRouteStatusText(segment) {
   const route = segment.route;
+  if (route?.status === 'non-walking') {
+    const mode = getTravelModeConfig(segment.travelMode);
+    const linearDistanceText = Number.isFinite(segment.linearDistanceKm)
+      ? ` &middot; ${formatSegmentDistanceKm(segment.linearDistanceKm)} lineales`
+      : '';
+    return `${mode.icon} ${mode.label}${linearDistanceText}`;
+  }
   if (route?.status === 'ok') {
     return `${route.durationText || formatRouteDuration(route.durationSeconds)} &middot; ${route.distanceText || formatRouteDistance(route.distanceMeters)}`;
   }
@@ -1199,6 +1414,7 @@ function getWalkingRouteStatusText(segment) {
 
 function getWalkingRouteStatusClass(segment) {
   if (segment.route?.status === 'ok') return 'walking-route-leg-ok';
+  if (segment.route?.status === 'non-walking') return 'walking-route-leg-transport';
   if (segment.route?.status === 'error') return 'walking-route-leg-error';
   if (segment.route?.status === 'missing-coordinates') return 'walking-route-leg-error';
   return 'walking-route-leg-pending';
@@ -1206,7 +1422,7 @@ function getWalkingRouteStatusClass(segment) {
 
 function renderWalkingRouteControls(model) {
   const summary = model.walking.summary;
-  const hasSegments = model.walking.segments.length > 0;
+  const hasSegments = model.walking.segments.some((segment) => segment.travelMode === 'walking');
   const hasCalculated = summary.calculatedCount > 0;
   const routeValidation = getRouteValidationModel(model);
   const isRouteActionDisabled = !hasSegments || _walkingRoutesLoading || !routeValidation.canCalculate;
@@ -1244,7 +1460,12 @@ function renderWalkingRouteSummary(model) {
   }
 
   if (summary.calculatedCount === 0) {
-    return `<div class="walking-route-summary">Desplazamientos a pie pendientes de calcular${summary.missingCount ? ` &middot; ${summary.missingCount} sin coordenadas` : ''}</div>`;
+    const details = [
+      summary.pendingCount ? 'Desplazamientos a pie pendientes de calcular' : '',
+      summary.nonWalkingCount ? `${summary.nonWalkingCount} tramo${summary.nonWalkingCount !== 1 ? 's' : ''} en transporte` : '',
+      summary.missingCount ? `${summary.missingCount} sin coordenadas` : ''
+    ].filter(Boolean);
+    return `<div class="walking-route-summary">${details.join(' &middot; ') || 'Sin desplazamientos calculables'}</div>`;
   }
 
   const details = [
@@ -1253,7 +1474,8 @@ function renderWalkingRouteSummary(model) {
     formatRouteDuration(summary.durationSeconds),
     summary.pendingCount ? `${summary.pendingCount} pendiente${summary.pendingCount !== 1 ? 's' : ''}` : '',
     summary.errorCount ? `${summary.errorCount} no disponible${summary.errorCount !== 1 ? 's' : ''}` : '',
-    summary.missingCount ? `${summary.missingCount} sin coordenadas` : ''
+    summary.missingCount ? `${summary.missingCount} sin coordenadas` : '',
+    summary.nonWalkingCount ? `${summary.nonWalkingCount} en transporte` : ''
   ].filter(Boolean);
 
   return `<div class="walking-route-summary">Desplazamientos a pie: ${details.join(' &middot; ')}</div>`;
@@ -1267,7 +1489,7 @@ function renderDistanceSegmentsList(model, options = {}) {
   if (!segments.length && model.plannedCount > 1) {
     return `
       <aside class="planner-map-segments-card">
-        <div class="planner-map-segments-heading"><h4>Tramos a pie</h4>${headingAddon}</div>
+        <div class="planner-map-segments-heading"><h4>Tramos del itinerario</h4>${headingAddon}</div>
         <p class="planner-map-segments-empty">No hay tramos calculables con coordenadas v&aacute;lidas.</p>
       </aside>
     `;
@@ -1288,23 +1510,38 @@ function renderDistanceSegmentsList(model, options = {}) {
 
   return `
     <aside class="planner-map-segments-card">
-      <div class="planner-map-segments-heading"><h4>Tramos a pie</h4>${headingAddon}</div>
+      <div class="planner-map-segments-heading"><h4>Tramos del itinerario</h4>${headingAddon}</div>
       <ul>${rows}</ul>
     </aside>
   `;
 }
 
 function renderGoogleMapsRouteButton(entries, variant = '') {
-  const routeUrl = getGoogleMapsRouteUrl(entries || [], { travelMode: 'walking', maxWaypoints: 8 });
-  const disabledClass = routeUrl ? '' : ' is-disabled';
-  const href = routeUrl || '#';
+  const routeUrls = getGoogleMapsRouteUrls(entries || [], { travelMode: 'walking', maxWaypoints: 8 });
+  const isInlineDayRoute = variant.split(/\s+/).includes('planner-day-inline-route');
+  const getRouteLabel = (index = 0) => {
+    const partLabel = routeUrls.length > 1 ? ` ${index + 1}/${routeUrls.length}` : '';
+    return `Google Maps${partLabel}`;
+  };
+  if (!routeUrls.length) {
+    return `
+      <div class="planner-map-route-actions ${variant}">
+        <span class="planner-map-route-link is-disabled" aria-disabled="true" aria-label="Google Maps no disponible" title="Google Maps no disponible">
+          <span class="planner-map-route-link-icon" aria-hidden="true">&#x1F4CD;</span>
+          ${isInlineDayRoute ? '' : '<span>Google Maps</span>'}
+        </span>
+      </div>
+    `;
+  }
 
   return `
     <div class="planner-map-route-actions ${variant}">
-      <a class="planner-map-route-link${disabledClass}" href="${href}" target="_blank" rel="noopener" aria-disabled="${routeUrl ? 'false' : 'true'}">
-        <span class="planner-map-route-link-icon" aria-hidden="true">&#x1F4CD;</span>
-        <span>Google Maps</span>
-      </a>
+      ${routeUrls.map((routeUrl, index) => `
+        <a class="planner-map-route-link" href="${routeUrl}" target="_blank" rel="noopener" aria-label="Abrir ruta en ${getRouteLabel(index)}" title="Abrir ruta en ${getRouteLabel(index)}">
+          <span class="planner-map-route-link-icon" aria-hidden="true">&#x1F4CD;</span>
+          ${isInlineDayRoute ? '' : `<span>${getRouteLabel(index)}</span>`}
+        </a>
+      `).join('')}
     </div>
   `;
 }
@@ -1370,11 +1607,16 @@ function getMostCommonLabel(values) {
 }
 
 function getExportDaySummary(entries) {
+  const parts = splitItineraryEntries(entries);
   const totalMinutes = entries.reduce((sum, entry) => {
-    const minutes = parseEstimatedDurationToMinutes(entry.place?.estimatedDuration);
+    const minutes = entry.entryType === 'location-stop'
+      ? Number(entry.stop?.durationMinutes)
+      : entry.entryType === 'activity'
+        ? parseEstimatedDurationToMinutes(entry.place?.estimatedDuration)
+        : null;
     return Number.isFinite(minutes) ? sum + minutes : sum;
   }, 0);
-  const priorityCounts = entries.reduce((acc, entry) => {
+  const priorityCounts = parts.activities.reduce((acc, entry) => {
     const priority = entry.place.priority || 'optional';
     acc[priority] = (acc[priority] || 0) + 1;
     return acc;
@@ -1383,14 +1625,16 @@ function getExportDaySummary(entries) {
   const mainZone = getMostCommonLabel(entries.map((entry) => entry.place.zone));
 
   return {
-    activityCount: entries.length,
+    activityCount: parts.activities.length,
+    stopCount: parts.stops.length,
+    anchorCount: parts.anchors.length,
     totalMinutes,
     totalDurationText: formatDurationMinutes(totalMinutes, { approximate: true }) || 'Sin duracion estimada',
     priorityCounts,
     mainLabel: [mainCity, mainZone].filter(Boolean).join(' · '),
-    rainyCount: entries.filter((entry) => entry.place.rainyFriendly).length,
-    ticketCount: entries.filter((entry) => entry.place.requiresTicket).length,
-    isSaturated: entries.length >= EXPORT_SATURATION_ACTIVITY_LIMIT || totalMinutes >= EXPORT_SATURATION_MINUTES_LIMIT
+    rainyCount: parts.activities.filter((entry) => entry.place.rainyFriendly).length,
+    ticketCount: parts.activities.filter((entry) => entry.place.requiresTicket).length,
+    isSaturated: parts.activities.length >= EXPORT_SATURATION_ACTIVITY_LIMIT || totalMinutes >= EXPORT_SATURATION_MINUTES_LIMIT
   };
 }
 
@@ -1494,6 +1738,7 @@ function getPdfDaySummaryItems(dayData) {
     const estimatedNote = formatEstimatedLinearDistanceNote(distance.summary.estimatedLinearDistanceKm, '+ ');
     return [
       `${summary.activityCount} actividades`,
+      summary.stopCount ? `${summary.stopCount} paradas logisticas` : '',
       `${summary.totalDurationText} visitas`,
       `${formatRouteDistance(distance.summary.distanceMeters)} a pie${estimatedNote ? ` (${estimatedNote})` : ''}`,
       `${formatRouteDuration(distance.summary.durationSeconds)} desplazamientos`,
@@ -1507,6 +1752,7 @@ function getPdfDaySummaryItems(dayData) {
 
   return [
     `${summary.activityCount} actividades`,
+    summary.stopCount ? `${summary.stopCount} paradas logisticas` : '',
     `${summary.totalDurationText} visitas`,
     `${formatTotalDistanceKm(distance.summary.totalDistanceKm)} lineales`,
     longestText,
@@ -1526,7 +1772,7 @@ function getExportDays(scope, selectedDay) {
     .map((day) => ({
       day,
       dateText: getDateTextForDay(day),
-      entries: (groups[day] || []).map((entry, index) => ({
+      entries: getComposedDayEntries(day, groups).map((entry, index) => ({
         ...entry,
         day,
         exportOrder: index + 1
@@ -2533,6 +2779,10 @@ async function drawPdfDistanceBlock(doc, layout, dayData, y, detailed) {
 }
 
 function getPdfActivityMeta(place) {
+  if (place.entityType === 'location') {
+    const kind = getLocationKindConfig(place.plannerKind);
+    return `${kind.label} - ${place.type || 'Ubicacion logistica'}${place.cityId ? ` - ${getCityName(place.cityId)}` : ''}`;
+  }
   const category = categories.find((item) => item.id === place.category);
   return `${getCityName(place.cityId)} · ${place.zone || 'Zona pendiente'} · ${category?.label || place.category || 'Categoria'}`;
 }
@@ -2544,6 +2794,13 @@ function getPdfPriorityEmoji(priority) {
 }
 
 function getPdfActivityChips(place) {
+  if (place.entityType === 'location') {
+    const kind = getLocationKindConfig(place.plannerKind);
+    return [
+      { label: kind.label, icon: 'priority', emoji: kind.icon, tone: place.plannerKind === 'accommodation' ? 'info' : 'success' },
+      { label: place.type || 'Ubicacion', icon: 'other', emoji: kind.icon, tone: 'neutral' }
+    ];
+  }
   const priority = priorityLabels[place.priority];
   const priorityTone = place.priority === 'must-see'
     ? 'danger'
@@ -2561,6 +2818,12 @@ function getPdfActivityChips(place) {
 }
 
 function getPdfActivitySections(place) {
+  if (place.entityType === 'location') {
+    return [
+      place.address ? { label: 'Direccion', value: place.address } : null,
+      place.comment ? { label: 'Nota', value: place.comment } : null
+    ].filter(Boolean);
+  }
   return [
     place.address ? { label: 'Direccion', value: place.address } : null,
     place.ticketInfo ? { label: 'Entrada', value: place.ticketInfo } : null,
@@ -2926,21 +3189,27 @@ function renderPlannerPage() {
   const mapModel = buildMapModel(_selectedMapScope, groups);
 
   const getDaySummary = (entries) => {
+    const parts = splitItineraryEntries(entries);
     const totalMinutes = entries.reduce((sum, entry) => {
-      const minutes = parseEstimatedDurationToMinutes(entry.place?.estimatedDuration);
+      const minutes = entry.entryType === 'location-stop'
+        ? Number(entry.stop?.durationMinutes)
+        : entry.entryType === 'activity'
+          ? parseEstimatedDurationToMinutes(entry.place?.estimatedDuration)
+          : null;
       return Number.isFinite(minutes) ? sum + minutes : sum;
     }, 0);
 
     const formattedDuration = formatDurationMinutes(totalMinutes, { approximate: true });
     return {
-      activityText: `${entries.length} actividad${entries.length !== 1 ? 'es' : ''}`,
-      durationText: formattedDuration ? `${formattedDuration} aprox.` : null
+      activityText: `${parts.activities.length} actividad${parts.activities.length !== 1 ? 'es' : ''}`,
+      logisticsText: parts.stops.length ? `${parts.stops.length} parada${parts.stops.length !== 1 ? 's' : ''}` : null,
+      durationText: formattedDuration ? `~ ${formattedDuration}` : null
     };
   };
 
   const daysHtml = Array.from({ length: _totalTripDays }, (_, i) => {
     const day = i + 1;
-    const entries = groups[day];
+    const entries = getComposedDayEntries(day, groups);
     const summary = getDaySummary(entries);
     const routeAction = entries.length ? renderGoogleMapsRouteButton(entries, 'planner-day-inline-route') : '';
     const coordinateWarning = renderDayCoordinateWarning(entries);
@@ -2954,11 +3223,14 @@ function renderPlannerPage() {
             <div class="planner-day-label">${formatDayLabel(day)}</div>
             <div class="planner-day-count">
               <span>${summary.activityText}</span>
+              ${summary.logisticsText ? `<span class="planner-day-summary-sep">&middot;</span><span>${summary.logisticsText}</span>` : ''}
               ${summary.durationText ? `<span class="planner-day-summary-sep">&middot;</span><span>${summary.durationText}</span>` : ''}
               ${coordinateWarning ? `<span class="planner-day-summary-sep">&middot;</span>${coordinateWarning}` : ''}
             </div>
           </div>
           <div class="planner-day-header-actions">
+            <button type="button" class="planner-day-map-btn planner-day-location-btn" data-stop-add="${day}">+ Parada</button>
+            <button type="button" class="planner-day-map-btn planner-day-location-btn" data-day-plan-open="${day}">Inicio/fin</button>
             ${routeAction}
             ${entries.length ? renderDayMapSummaryButton(day) : ''}
             ${entries.length ? renderRouteValidationToggle(day) : ''}
@@ -3135,14 +3407,45 @@ function openPlaceModal(place) {
   const modal = document.getElementById('planner-modal');
   if (!overlay || !modal) return;
 
-  modal.innerHTML = renderModal(place);
+  modal.innerHTML = place.entityType === 'location' ? renderLocationModal(place) : renderModal(place);
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
   document.getElementById('planner-modal-close')?.addEventListener('click', closePlaceModal);
-  document.getElementById('planner-edit-place-btn')?.addEventListener('click', () => openPlannerPlaceEditor(place));
+  if (place.entityType !== 'location') {
+    document.getElementById('planner-edit-place-btn')?.addEventListener('click', () => openPlannerPlaceEditor(place));
+  }
   setTimeout(() => {
-    renderPlaceMap(`modal-map-${place.id}`, place);
+    if (hasValidCoordinates(place)) renderPlaceMap(`modal-map-${place.id}`, place);
   }, 100);
+}
+
+function renderLocationModal(place) {
+  const location = getLocation(place.sourceLocationId);
+  if (!location) return '';
+  const kind = getLocationKindConfig(location.kind);
+  const mapsUrl = getGoogleMapsUrl(place, _globalSettings?.mapLinkStyle);
+  return `
+    <div class="modal-scroll">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <div>
+          <div class="place-card-category">${kind.icon} ${escapeHtml(kind.label)}</div>
+          <h2>${escapeHtml(location.name)}</h2>
+        </div>
+        <button class="modal-close" id="planner-modal-close">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-badges">
+          <span class="priority-badge priority-optional">${escapeHtml(getLocationSubtypeLabel(location.kind, location.subtype))}</span>
+          ${location.cityId ? `<span class="priority-badge priority-recommended">${escapeHtml(getCityName(location.cityId))}</span>` : ''}
+        </div>
+        ${location.address ? `<div class="modal-info-section"><h4>Direccion</h4><p>${escapeHtml(location.address)}</p></div>` : ''}
+        ${location.notes ? `<div class="modal-info-section"><h4>Notas</h4><p>${escapeHtml(location.notes)}</p></div>` : ''}
+        <a href="${mapsUrl}" target="_blank" rel="noopener" class="maps-link-btn">Abrir en Google Maps</a>
+        ${hasValidCoordinates(place) ? `<div id="modal-map-${escapeHtml(place.id)}" class="modal-map"></div>` : ''}
+      </div>
+    </div>
+  `;
 }
 
 function openPlannerPlaceEditor(place) {
@@ -3158,7 +3461,183 @@ function openPlannerPlaceEditor(place) {
   window.location.href = `/city.html?id=${encodeURIComponent(place.cityId)}&editPlace=${encodeURIComponent(place.id)}`;
 }
 
+function openPlannerStopModal(day, stopId = null) {
+  const overlay = document.getElementById('planner-modal-overlay');
+  const modal = document.getElementById('planner-modal');
+  if (!overlay || !modal) return;
+  const existing = stopId ? getPlannerStop(stopId) : null;
+  const draft = normalizePlannerStopRecord(existing || {
+    id: '',
+    assignedDay: Number(day),
+    locationId: '',
+    purpose: '',
+    note: '',
+    durationMinutes: null,
+    travelModeFromPrevious: 'walking'
+  });
+  const hasLocations = _locations.some((location) => location.active !== false);
+
+  modal.innerHTML = `
+    <div class="modal-scroll">
+      <div class="modal-header">
+        <div>
+          <div class="place-card-category">Parada logistica</div>
+          <h2>${existing ? 'Editar parada' : `Anadir parada al dia ${day}`}</h2>
+        </div>
+        <button class="modal-close" id="planner-modal-close">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <form id="planner-stop-form" class="admin-form">
+          <div class="form-group">
+            <label>Ubicacion *</label>
+            ${renderPlannerLocationPicker({
+              id: 'planner-stop-location',
+              selectedId: draft.locationId,
+              placeholder: 'Selecciona una ubicacion'
+            })}
+          </div>
+          <div class="form-group">
+            <label>Motivo</label>
+            <input type="text" id="planner-stop-purpose" value="${escapeHtml(draft.purpose || '')}" placeholder="Dejar mochilas, coger el tren, descansar...">
+          </div>
+          <div class="admin-form-grid compact">
+            <div class="form-group">
+              <label>Duracion aproximada</label>
+              <input type="number" id="planner-stop-duration" min="0" step="5" value="${draft.durationMinutes ?? ''}" placeholder="Minutos">
+            </div>
+            <div class="form-group">
+              <label>Llegada desde el punto anterior</label>
+              <select id="planner-stop-mode">
+                ${TRAVEL_MODES.map((mode) => `<option value="${mode.id}" ${mode.id === draft.travelModeFromPrevious ? 'selected' : ''}>${mode.icon} ${mode.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Nota</label>
+            <textarea id="planner-stop-note" rows="2">${escapeHtml(draft.note || '')}</textarea>
+          </div>
+          ${hasLocations
+            ? ''
+            : '<p class="planner-map-distance-warning">Primero crea un alojamiento o punto de transporte en <a href="/admin.html#ubicaciones">Configuracion &gt; Ubicaciones</a>.</p>'}
+          <p id="planner-stop-error" class="admin-inline-msg"></p>
+          <button type="submit" class="maps-link-btn" style="width:100%;justify-content:center;" ${hasLocations ? '' : 'disabled'}>Guardar parada</button>
+        </form>
+      </div>
+    </div>
+  `;
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('planner-modal-close')?.addEventListener('click', closePlaceModal);
+  document.getElementById('planner-stop-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const locationId = document.getElementById('planner-stop-location').value;
+    if (!locationId) {
+      const error = document.getElementById('planner-stop-error');
+      error.textContent = 'Selecciona una ubicacion.';
+      error.style.display = 'block';
+      return;
+    }
+    const maxOrder = Math.max(
+      -1,
+      ..._plannerItems.filter((item) => Number(item.assignedDay) === Number(day)).map((item) => Number(item.order) || 0),
+      ..._plannerStops.filter((stop) => Number(stop.assignedDay) === Number(day)).map((stop) => Number(stop.order) || 0)
+    );
+    const nextStop = normalizePlannerStopRecord({
+      ...draft,
+      id: existing?.id || createPlannerStopId(),
+      locationId,
+      assignedDay: Number(day),
+      order: existing?.order ?? maxOrder + 1,
+      purpose: document.getElementById('planner-stop-purpose').value.trim(),
+      durationMinutes: document.getElementById('planner-stop-duration').value,
+      travelModeFromPrevious: document.getElementById('planner-stop-mode').value,
+      note: document.getElementById('planner-stop-note').value.trim()
+    });
+    await putAll('plannerStops', [nextStop]);
+    const index = _plannerStops.findIndex((stop) => stop.id === nextStop.id);
+    if (index >= 0) _plannerStops[index] = nextStop;
+    else _plannerStops.push(nextStop);
+    markWalkingRoutesAsStale([Number(day)]);
+    closePlaceModal();
+    renderPlannerPage();
+    showToast(existing ? 'Parada actualizada.' : 'Parada anadida al itinerario.');
+  });
+}
+
+function openPlannerDayPlanModal(day) {
+  const overlay = document.getElementById('planner-modal-overlay');
+  const modal = document.getElementById('planner-modal');
+  if (!overlay || !modal) return;
+  const plan = getDayPlan(day);
+  modal.innerHTML = `
+    <div class="modal-scroll">
+      <div class="modal-header">
+        <div>
+          <div class="place-card-category">Anclas de jornada</div>
+          <h2>Inicio y final del dia ${day}</h2>
+        </div>
+        <button class="modal-close" id="planner-modal-close">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <form id="planner-day-plan-form" class="admin-form">
+          <div class="form-group">
+            <label>Alojamiento de inicio</label>
+            ${renderPlannerLocationPicker({
+              id: 'planner-day-start',
+              selectedId: plan.startLocationId,
+              kind: 'accommodation',
+              placeholder: 'Sin alojamiento de inicio',
+              selectedMeta: 'city'
+            })}
+          </div>
+          <div class="form-group">
+            <label>Alojamiento de final</label>
+            ${renderPlannerLocationPicker({
+              id: 'planner-day-end',
+              selectedId: plan.endLocationId,
+              kind: 'accommodation',
+              placeholder: 'Sin alojamiento final',
+              selectedMeta: 'city'
+            })}
+          </div>
+          <div class="form-group">
+            <label>Modo de llegada al alojamiento final</label>
+            <select id="planner-day-end-mode">
+              ${TRAVEL_MODES.map((mode) => `<option value="${mode.id}" ${mode.id === plan.endTravelModeFromPrevious ? 'selected' : ''}>${mode.icon} ${mode.label}</option>`).join('')}
+            </select>
+          </div>
+          ${_locations.some((location) => location.kind === 'accommodation' && location.active !== false)
+            ? ''
+            : '<p class="planner-map-distance-warning">Primero crea un alojamiento en <a href="/admin.html#ubicaciones">Configuracion &gt; Ubicaciones</a>.</p>'}
+          <button type="submit" class="maps-link-btn" style="width:100%;justify-content:center;">Guardar inicio y final</button>
+        </form>
+      </div>
+    </div>
+  `;
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.getElementById('planner-modal-close')?.addEventListener('click', closePlaceModal);
+  document.getElementById('planner-day-plan-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const updated = normalizeDayPlanRecord({
+      day: Number(day),
+      startLocationId: document.getElementById('planner-day-start').value,
+      endLocationId: document.getElementById('planner-day-end').value,
+      endTravelModeFromPrevious: document.getElementById('planner-day-end-mode').value
+    });
+    await putAll('dayPlans', [updated]);
+    const index = _dayPlans.findIndex((candidate) => Number(candidate.day) === Number(day));
+    if (index >= 0) _dayPlans[index] = updated;
+    else _dayPlans.push(updated);
+    markWalkingRoutesAsStale([Number(day)]);
+    closePlaceModal();
+    renderPlannerPage();
+    showToast(`Inicio y final del dia ${day} actualizados.`);
+  });
+}
+
 function closePlaceModal() {
+  closeLocationPickers();
   document.getElementById('planner-modal-overlay')?.classList.remove('open');
   document.body.style.overflow = '';
 }
@@ -3175,6 +3654,31 @@ function closePlannerDayMapModal() {
   _plannerDayMapModalDay = null;
   document.getElementById('planner-day-map-overlay')?.classList.remove('open');
   document.body.style.overflow = '';
+}
+
+function closeLocationPickers(exceptPicker = null) {
+  document.querySelectorAll('.planner-location-picker.is-open').forEach((picker) => {
+    if (picker === exceptPicker) return;
+    picker.classList.remove('is-open');
+    picker.querySelector('[data-location-picker-toggle]')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function setLocationPickerValue(option) {
+  const picker = option.closest('[data-location-picker]');
+  if (!picker) return;
+  const input = picker.querySelector('input[type="hidden"]');
+  const selected = picker.querySelector('[data-location-picker-selected]');
+  const selectedMeta = picker.querySelector('[data-location-picker-selected-meta]');
+  if (input) input.value = option.dataset.locationId || '';
+  if (selected) selected.textContent = option.dataset.locationLabel || 'Selecciona una ubicacion';
+  if (selectedMeta) selectedMeta.textContent = option.dataset.locationSelectedMeta || '';
+  picker.querySelectorAll('[data-location-picker-option]').forEach((candidate) => {
+    const isSelected = candidate === option;
+    candidate.classList.toggle('is-selected', isSelected);
+    candidate.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+  });
+  closeLocationPickers();
 }
 
 function renderPlannerDayMapOverlay(model, day) {
@@ -3318,7 +3822,9 @@ async function calculateWalkingRoutesForModel(model, options = {}) {
   if (_walkingRoutesLoading) return;
 
   const forceRefresh = options.forceRefresh === true;
-  const calculableRoutes = model.routes.filter((route) => (route.allEntries || []).length >= 2);
+  const calculableRoutes = model.routes.filter((route) => (
+    (route.walkingSegments || []).some((segment) => segment.travelMode === 'walking')
+  ));
   const routeValidation = getRouteValidationModel(model);
 
   if (!calculableRoutes.length) {
@@ -3395,25 +3901,52 @@ function getZoneFromElement(el) {
 }
 
 function collectPlannerUpdatesFromDOM() {
-  const updates = [];
+  const planner = [];
+  const stops = [];
 
-  const trayCards = document.querySelectorAll('.planner-tray-cards > .planner-mini-card');
+  const trayCards = document.querySelectorAll('.planner-tray-cards > .planner-sortable-card[data-entry-type="activity"]');
   trayCards.forEach((card, idx) => {
     const placeId = card.dataset.id;
     if (!placeId) return;
-    updates.push({ placeId, status: 'in-tray', assignedDay: null, order: idx });
+    const existing = getPlannerItem(placeId);
+    planner.push({
+      ...existing,
+      placeId,
+      status: 'in-tray',
+      assignedDay: null,
+      order: idx,
+      travelModeFromPrevious: normalizeTravelMode(existing?.travelModeFromPrevious)
+    });
   });
 
   for (let day = 1; day <= _totalTripDays; day += 1) {
-    const dayCards = document.querySelectorAll(`.planner-day-block[data-day="${day}"] .planner-day-cards > .planner-mini-card`);
+    const dayCards = document.querySelectorAll(`.planner-day-block[data-day="${day}"] .planner-day-cards > .planner-sortable-card`);
     dayCards.forEach((card, idx) => {
-      const placeId = card.dataset.id;
-      if (!placeId) return;
-      updates.push({ placeId, status: 'planned', assignedDay: day, order: idx });
+      const entryId = card.dataset.id;
+      if (!entryId) return;
+      if (card.dataset.entryType === 'location-stop') {
+        const existing = getPlannerStop(entryId);
+        if (!existing) return;
+        stops.push(normalizePlannerStopRecord({
+          ...existing,
+          assignedDay: day,
+          order: idx
+        }));
+        return;
+      }
+      const existing = getPlannerItem(entryId);
+      planner.push({
+        ...existing,
+        placeId: entryId,
+        status: 'planned',
+        assignedDay: day,
+        order: idx,
+        travelModeFromPrevious: normalizeTravelMode(existing?.travelModeFromPrevious)
+      });
     });
   }
 
-  return updates;
+  return { planner, stops };
 }
 
 async function handleDropEnd(evt) {
@@ -3430,7 +3963,7 @@ async function handleDropEnd(evt) {
   }
 
   const updates = collectPlannerUpdatesFromDOM();
-  if (updates.length === 0) {
+  if (updates.planner.length === 0 && updates.stops.length === 0) {
     renderPlannerPage();
     return;
   }
@@ -3441,7 +3974,7 @@ async function handleDropEnd(evt) {
     Number.parseInt(evt.to?.closest('.planner-day-block')?.dataset.day || '', 10)
   ];
 
-  updates.forEach((update) => {
+  updates.planner.forEach((update) => {
     const existing = _plannerItems.find((item) => item.placeId === update.placeId);
     if (existing) {
       existing.status = update.status;
@@ -3451,8 +3984,15 @@ async function handleDropEnd(evt) {
       _plannerItems.push({ ...update });
     }
   });
+  updates.stops.forEach((update) => {
+    const index = _plannerStops.findIndex((stop) => stop.id === update.id);
+    if (index >= 0) _plannerStops[index] = update;
+  });
 
-  await putAll('planner', updates);
+  await putManyByStore({
+    planner: updates.planner,
+    plannerStops: updates.stops
+  });
   markWalkingRoutesAsStale(affectedDays);
   renderPlannerPage();
   showToast(toastMessage);
@@ -3461,6 +4001,7 @@ async function handleDropEnd(evt) {
 function initSortable() {
   _sortableInstances.forEach((instance) => instance.destroy());
   _sortableInstances = [];
+  if (hasActivePlannerFilters()) return;
 
   const trayContainer = document.querySelector('.planner-tray-cards');
   if (trayContainer) {
@@ -3471,10 +4012,14 @@ function initSortable() {
       dragClass: 'planning-drag',
       fallbackOnBody: true,
       swapThreshold: 0.65,
-      group: { name: 'planner-shared', pull: true, put: true },
-      draggable: '.planner-mini-card',
+      group: {
+        name: 'planner-shared',
+        pull: true,
+        put: (_to, _from, dragEl) => dragEl?.dataset?.entryType === 'activity'
+      },
+      draggable: '.planner-sortable-card',
       sort: true,
-      filter: '.planner-chip-trigger, .planner-card-discarded',
+      filter: '.planner-chip-trigger, .planner-card-discarded, .planner-entry-mode, .planner-location-action',
       onEnd: handleDropEnd
     }));
   }
@@ -3492,9 +4037,9 @@ function initSortable() {
       fallbackOnBody: true,
       swapThreshold: 0.65,
       group: { name: 'planner-shared', pull: true, put: true },
-      draggable: '.planner-mini-card',
+      draggable: '.planner-sortable-card',
       sort: true,
-      filter: '.planner-chip-trigger, .planner-card-discarded',
+      filter: '.planner-chip-trigger, .planner-card-discarded, .planner-entry-mode, .planner-location-action',
       onEnd: handleDropEnd
     }));
   }
@@ -3505,7 +4050,7 @@ async function setPlannerState(placeId, newStatus, assignedDay) {
   let item = _plannerItems.find((p) => p.placeId === placeId);
   const previousDay = Number.parseInt(item?.assignedDay || '', 10);
   if (!item) {
-    item = { placeId, status: newStatus, assignedDay, order: 0 };
+    item = { placeId, status: newStatus, assignedDay, order: 0, travelModeFromPrevious: 'walking' };
     _plannerItems.push(item);
   } else {
     item.status = newStatus;
@@ -3520,6 +4065,30 @@ async function setPlannerState(placeId, newStatus, assignedDay) {
 }
 
 function handlePageClick(e) {
+  const locationPickerOption = e.target.closest('[data-location-picker-option]');
+  if (locationPickerOption) {
+    e.preventDefault();
+    e.stopPropagation();
+    setLocationPickerValue(locationPickerOption);
+    return;
+  }
+
+  const locationPickerToggle = e.target.closest('[data-location-picker-toggle]');
+  if (locationPickerToggle) {
+    e.preventDefault();
+    e.stopPropagation();
+    const picker = locationPickerToggle.closest('[data-location-picker]');
+    const shouldOpen = !picker?.classList.contains('is-open');
+    closeLocationPickers(picker);
+    picker?.classList.toggle('is-open', shouldOpen);
+    locationPickerToggle.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    return;
+  }
+
+  if (!e.target.closest('[data-location-picker]')) {
+    closeLocationPickers();
+  }
+
   const viewBtn = e.target.closest('[data-view-mode]');
   if (viewBtn) {
     return;
@@ -3549,6 +4118,42 @@ function handlePageClick(e) {
   if (dayMapBtn) {
     e.preventDefault();
     openPlannerDayMapModal(dayMapBtn.dataset.dayMapOpen);
+    return;
+  }
+
+  const addStopBtn = e.target.closest('[data-stop-add]');
+  if (addStopBtn) {
+    e.preventDefault();
+    openPlannerStopModal(Number.parseInt(addStopBtn.dataset.stopAdd, 10));
+    return;
+  }
+
+  const editStopBtn = e.target.closest('[data-stop-edit]');
+  if (editStopBtn) {
+    e.preventDefault();
+    const stop = getPlannerStop(editStopBtn.dataset.stopEdit);
+    if (stop) openPlannerStopModal(stop.assignedDay, stop.id);
+    return;
+  }
+
+  const deleteStopBtn = e.target.closest('[data-stop-delete]');
+  if (deleteStopBtn) {
+    e.preventDefault();
+    const stop = getPlannerStop(deleteStopBtn.dataset.stopDelete);
+    if (!stop) return;
+    remove('plannerStops', stop.id).then(() => {
+      _plannerStops = _plannerStops.filter((candidate) => candidate.id !== stop.id);
+      markWalkingRoutesAsStale([stop.assignedDay]);
+      renderPlannerPage();
+      showToast('Parada eliminada.');
+    });
+    return;
+  }
+
+  const dayPlanBtn = e.target.closest('[data-day-plan-open]');
+  if (dayPlanBtn) {
+    e.preventDefault();
+    openPlannerDayPlanModal(Number.parseInt(dayPlanBtn.dataset.dayPlanOpen, 10));
     return;
   }
 
@@ -3634,7 +4239,40 @@ function handlePageClick(e) {
   }
 }
 
-function handlePageChange(e) {
+async function handlePageChange(e) {
+  const modeSelect = e.target.closest('[data-entry-mode]');
+  if (modeSelect) {
+    const entryType = modeSelect.dataset.entryMode;
+    const entryId = modeSelect.dataset.entryId;
+    const day = Number.parseInt(modeSelect.dataset.entryDay, 10);
+    const travelModeFromPrevious = normalizeTravelMode(modeSelect.value);
+    if (entryType === 'activity') {
+      const item = getPlannerItem(entryId);
+      const place = _places.find((candidate) => candidate.id === entryId);
+      if (item && canConfigureEntryTravelMode({ entryType: 'activity', place, item })) {
+        item.travelModeFromPrevious = travelModeFromPrevious;
+        await putAll('planner', [item]);
+      }
+    } else if (entryType === 'location-stop') {
+      const stop = getPlannerStop(entryId);
+      if (stop) {
+        stop.travelModeFromPrevious = travelModeFromPrevious;
+        await putAll('plannerStops', [stop]);
+      }
+    } else if (entryType === 'day-end') {
+      const plan = getDayPlan(day);
+      plan.endTravelModeFromPrevious = travelModeFromPrevious;
+      const index = _dayPlans.findIndex((candidate) => Number(candidate.day) === day);
+      if (index >= 0) _dayPlans[index] = plan;
+      else _dayPlans.push(plan);
+      await putAll('dayPlans', [plan]);
+    }
+    markWalkingRoutesAsStale([day]);
+    renderPlannerPage();
+    showToast('Modo de desplazamiento actualizado.');
+    return;
+  }
+
   const routeValidationInput = e.target.closest('[data-route-validation-day]');
   if (routeValidationInput && !routeValidationInput.disabled) {
     const day = routeValidationInput.dataset.routeValidationDay;
@@ -3682,8 +4320,14 @@ async function boot() {
   _globalSettings = settingsArray.find((s) => s.id === 'global') || {};
 
   _places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
-  _plannerItems = (await getAll('planner')) || [];
+  _plannerItems = ((await getAll('planner')) || []).map((item) => ({
+    ...item,
+    travelModeFromPrevious: normalizeTravelMode(item.travelModeFromPrevious)
+  }));
   _citiesArray = sortCities(await getAll('cities'));
+  _locations = (await getAll('locations')).map(normalizeLocationRecord);
+  _dayPlans = (await getAll('dayPlans')).map(normalizeDayPlanRecord);
+  _plannerStops = (await getAll('plannerStops')).map(normalizePlannerStopRecord);
   _totalTripDays = calcTripDays(_globalSettings);
 
   const groups = buildGroupedData();
