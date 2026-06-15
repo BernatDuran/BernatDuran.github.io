@@ -3,6 +3,7 @@ import { buildDemoDataset } from '../data/demoDataset.js';
 import { getAll, putAll, getById } from './db.js';
 import { getPlaceLatLng, normalizePlaceRecord } from './placeData.js';
 import { normalizeCityRecord } from './cityData.js';
+import { normalizeDayPlanRecord, normalizeLocationRecord, normalizePlannerStopRecord } from './locationData.js';
 
 export async function runDataMigration() {
   const existingCities = await getAll('cities');
@@ -25,6 +26,9 @@ export async function runDataMigration() {
     await putAll('cities', demoDataset.cities);
     await putAll('places', demoDataset.places);
     await putAll('planner', demoPlanner);
+    if (demoDataset.locations.length) await putAll('locations', demoDataset.locations);
+    if (demoDataset.dayPlans.length) await putAll('dayPlans', demoDataset.dayPlans);
+    if (demoDataset.plannerStops.length) await putAll('plannerStops', demoDataset.plannerStops);
     await putAll('settings', demoDataset.settings);
     
     console.log('Migration complete!');
@@ -81,7 +85,17 @@ export async function runDataMigration() {
     }
   }
 
+  const [locations, dayPlans, plannerStops] = await Promise.all([
+    getAll('locations'),
+    getAll('dayPlans'),
+    getAll('plannerStops')
+  ]);
+  if (locations.length) await putAll('locations', locations.map(normalizeLocationRecord));
+  if (dayPlans.length) await putAll('dayPlans', dayPlans.map(normalizeDayPlanRecord));
+  if (plannerStops.length) await putAll('plannerStops', plannerStops.map(normalizePlannerStopRecord));
+
   await ensureBaseCitiesExist();
+  await ensureBaseLocationsExist();
   await applyProfessionalCuration();
 }
 
@@ -103,6 +117,42 @@ export async function ensureBaseCitiesExist() {
 
   if (missingCities.length) {
     await putAll('cities', missingCities);
+  }
+}
+
+export async function ensureBaseLocationsExist() {
+  const demoDataset = buildDemoDataset();
+  const [existingLocations, existingDayPlans, existingPlannerStops] = await Promise.all([
+    getAll('locations'),
+    getAll('dayPlans'),
+    getAll('plannerStops')
+  ]);
+
+  const existingLocationIds = new Set(existingLocations.map((location) => location.id));
+  const missingLocations = demoDataset.locations
+    .filter((location) => !existingLocationIds.has(location.id))
+    .map(normalizeLocationRecord);
+
+  if (missingLocations.length) {
+    await putAll('locations', missingLocations);
+  }
+
+  const existingDays = new Set(existingDayPlans.map((dayPlan) => Number.parseInt(dayPlan.day, 10)));
+  const missingDayPlans = demoDataset.dayPlans
+    .filter((dayPlan) => !existingDays.has(Number.parseInt(dayPlan.day, 10)))
+    .map(normalizeDayPlanRecord);
+
+  if (missingDayPlans.length) {
+    await putAll('dayPlans', missingDayPlans);
+  }
+
+  const existingStopIds = new Set(existingPlannerStops.map((stop) => stop.id));
+  const missingPlannerStops = demoDataset.plannerStops
+    .filter((stop) => !existingStopIds.has(stop.id))
+    .map(normalizePlannerStopRecord);
+
+  if (missingPlannerStops.length) {
+    await putAll('plannerStops', missingPlannerStops);
   }
 }
 
@@ -142,7 +192,8 @@ async function applyProfessionalCuration() {
       favorite: Boolean(item.favorite),
       status: item.status || 'in-tray',
       assignedDay: item.status === 'planned' ? item.assignedDay : null,
-      order: item.order || 0
+      order: item.order || 0,
+      travelModeFromPrevious: item.travelModeFromPrevious || 'walking'
     }));
   const currentGlobalSettings = await getById('settings', 'global');
   const nextGlobalSettings = {

@@ -1,5 +1,5 @@
 const DB_NAME = 'japanGuideDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -23,6 +23,19 @@ export function initDB() {
         }
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('locations')) {
+          const locationsStore = db.createObjectStore('locations', { keyPath: 'id' });
+          locationsStore.createIndex('kind', 'kind', { unique: false });
+          locationsStore.createIndex('cityId', 'cityId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('dayPlans')) {
+          db.createObjectStore('dayPlans', { keyPath: 'day' });
+        }
+        if (!db.objectStoreNames.contains('plannerStops')) {
+          const plannerStopsStore = db.createObjectStore('plannerStops', { keyPath: 'id' });
+          plannerStopsStore.createIndex('assignedDay', 'assignedDay', { unique: false });
+          plannerStopsStore.createIndex('locationId', 'locationId', { unique: false });
         }
       };
 
@@ -112,5 +125,25 @@ export async function clear(storeName) {
     const request = store.clear();
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
+  });
+}
+
+export async function putManyByStore(recordsByStore = {}) {
+  const storeNames = Object.keys(recordsByStore)
+    .filter((storeName) => Array.isArray(recordsByStore[storeName]));
+  if (!storeNames.length) return;
+
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeNames, 'readwrite');
+
+    storeNames.forEach((storeName) => {
+      const store = tx.objectStore(storeName);
+      recordsByStore[storeName].forEach((item) => store.put(item));
+    });
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
   });
 }

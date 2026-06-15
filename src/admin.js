@@ -1,7 +1,7 @@
 ﻿import './styles/main.css';
 import './styles/components.css';
 import './styles/pages.css';
-import { getAll, getById, putAll, clear } from './utils/db.js';
+import { getAll, getById, putAll, clear, remove } from './utils/db.js';
 import Sortable from 'sortablejs';
 import { icons } from './utils/helpers.js';
 import { ensureBaseCitiesExist, runDataMigration } from './utils/dataMigration.js';
@@ -9,12 +9,35 @@ import { normalizePlaceRecord, PLACE_IMPORT_EXPORT_FIELDS, toImportExportRow } f
 import { formatRecommendedDays, normalizeCityRecord, sortCities } from './utils/cityData.js';
 import { categories, priorityLabels } from './data/cities.js';
 import { buildDemoDataset } from './data/demoDataset.js';
+import {
+  LOCATION_KINDS,
+  LOCATION_SUBTYPES,
+  TRAVEL_MODES,
+  createLocationId,
+  getLocationKindConfig,
+  getLocationSubtypeLabel,
+  normalizeDayPlanRecord,
+  normalizeLocationRecord,
+  normalizePlannerStopRecord,
+  normalizeTravelMode,
+  validateLocationRecord
+} from './utils/locationData.js';
 import * as XLSX from 'xlsx';
 
 const app = document.getElementById('app');
-const PLANNER_IMPORT_EXPORT_FIELDS = ['placeId', 'cityId', 'favorite', 'status', 'assignedDay', 'order'];
+const PLANNER_IMPORT_EXPORT_FIELDS = ['placeId', 'cityId', 'favorite', 'status', 'assignedDay', 'order', 'travelModeFromPrevious'];
 const PLANNER_STATUS_VALUES = ['in-tray', 'planned', 'done', 'discarded'];
 const CITY_ID_PATTERN = /^[a-z0-9-]+$/;
+const BACKUP_SCHEMA_VERSION = 3;
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
 function getCityIdList(citiesArray = []) {
   return sortCities(citiesArray).map((city) => city.id).filter(Boolean);
@@ -228,7 +251,8 @@ function normalizePlannerRecord(item) {
     favorite: normalizeImportBoolean(item?.favorite),
     status: item?.status || null,
     assignedDay: item?.assignedDay == null || item?.assignedDay === '' ? null : Number.parseInt(item.assignedDay, 10),
-    order: item?.order == null || item?.order === '' ? 0 : Number.parseInt(item.order, 10)
+    order: item?.order == null || item?.order === '' ? 0 : Number.parseInt(item.order, 10),
+    travelModeFromPrevious: normalizeTravelMode(item?.travelModeFromPrevious)
   };
 }
 
@@ -324,7 +348,8 @@ function buildPlannerExportRows(plannerItems, places) {
         favorite: item.favorite,
         status: item.status,
         assignedDay: item.assignedDay,
-        order: item.order
+        order: item.order,
+        travelModeFromPrevious: item.travelModeFromPrevious
       };
     });
 }
@@ -374,12 +399,23 @@ function downloadTextFile(content, fileName, type = 'text/csv;charset=utf-8') {
   URL.revokeObjectURL(url);
 }
 
-function parseWorkbookRows(arrayBuffer) {
+function parseWorkbook(arrayBuffer) {
   const data = new Uint8Array(arrayBuffer);
   const workbook = XLSX.read(data, { type: 'array' });
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
-  return XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+  const rowsBySheet = Object.fromEntries(
+    workbook.SheetNames.map((sheetName) => [
+      sheetName,
+      XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+    ])
+  );
+  return {
+    firstRows: rowsBySheet[workbook.SheetNames[0]] || [],
+    rowsBySheet
+  };
+}
+
+function parseWorkbookRows(arrayBuffer) {
+  return parseWorkbook(arrayBuffer).firstRows;
 }
 
 function getTotalTripDays(globalSettings = {}) {
@@ -390,12 +426,179 @@ function getTotalTripDays(globalSettings = {}) {
   return days >= 1 && !Number.isNaN(days) ? days : 7;
 }
 
+function normalizeImportedLocations(rows = []) {
+  const byId = new Map();
+  rows.forEach((row) => {
+    const normalized = normalizeLocationRecord(row);
+    if (!validateLocationRecord(row) && normalized.id) byId.set(normalized.id, normalized);
+  });
+  return Array.from(byId.values());
+}
+
+function normalizeImportedDayPlans(rows = [], locations = [], totalTripDays = 7) {
+  const accommodationIds = new Set(
+    locations.filter((location) => location.kind === 'accommodation').map((location) => location.id)
+  );
+  const byDay = new Map();
+  rows.forEach((row) => {
+    const plan = normalizeDayPlanRecord(row);
+    if (!Number.isFinite(plan.day) || plan.day < 1 || plan.day > totalTripDays) return;
+    byDay.set(plan.day, {
+      ...plan,
+      startLocationId: accommodationIds.has(plan.startLocationId) ? plan.startLocationId : null,
+      endLocationId: accommodationIds.has(plan.endLocationId) ? plan.endLocationId : null
+    });
+  });
+  return Array.from(byDay.values());
+}
+
+function normalizeImportedPlannerStops(rows = [], locations = [], totalTripDays = 7) {
+  const locationIds = new Set(locations.map((location) => location.id));
+  const byId = new Map();
+  rows.forEach((row) => {
+    const stop = normalizePlannerStopRecord(row);
+    if (
+      !stop.id
+      || !locationIds.has(stop.locationId)
+      || !Number.isFinite(stop.assignedDay)
+      || stop.assignedDay < 1
+      || stop.assignedDay > totalTripDays
+    ) return;
+    byId.set(stop.id, stop);
+  });
+  return Array.from(byId.values());
+}
+
+function renderLocationOptions(locations = [], selectedId = '', options = {}) {
+  const allowedKind = options.kind || null;
+  const entries = locations
+    .filter((location) => location.active !== false)
+    .filter((location) => !allowedKind || location.kind === allowedKind)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'));
+  return [
+    `<option value="">${options.emptyLabel || 'Sin asignar'}</option>`,
+    ...entries.map((location) => (
+      `<option value="${escapeHtml(location.id)}" ${location.id === selectedId ? 'selected' : ''}>${escapeHtml(location.name)}</option>`
+    ))
+  ].join('');
+}
+
+function renderLocationsAdminPanel(locations, dayPlans, citiesArray, globalSettings, activeTab) {
+  const totalTripDays = getTotalTripDays(globalSettings);
+  const dayPlanByDay = new Map(dayPlans.map((plan) => [Number(plan.day), normalizeDayPlanRecord(plan)]));
+  const locationRows = LOCATION_KINDS.map((kind) => {
+    const rows = locations
+      .filter((location) => location.kind === kind.id)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'es'))
+      .map((location) => {
+        const cityName = citiesArray.find((city) => city.id === location.cityId)?.name || 'Sin ciudad';
+        const coordinateState = location.lat != null && location.lng != null ? 'Coordenadas completas' : 'Sin coordenadas';
+        return `
+          <div class="admin-location-row ${location.active === false ? 'is-inactive' : ''}" data-location-id="${escapeHtml(location.id)}">
+            <div class="admin-location-icon">${kind.icon}</div>
+            <div class="admin-location-main">
+              <strong>${escapeHtml(location.name)}</strong>
+              <span>${escapeHtml(getLocationSubtypeLabel(location.kind, location.subtype))} &middot; ${escapeHtml(cityName)} &middot; ${coordinateState}</span>
+              ${location.address ? `<small>${escapeHtml(location.address)}</small>` : ''}
+            </div>
+            <div class="admin-location-actions">
+              ${location.active === false ? '<span class="admin-location-inactive-badge">Inactiva</span>' : ''}
+              <button type="button" class="filter-pill btn-edit-location" data-location-id="${escapeHtml(location.id)}">Editar</button>
+              <button type="button" class="filter-pill btn-delete-location" data-location-id="${escapeHtml(location.id)}">Eliminar</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+    return `
+      <section class="admin-location-group">
+        <div class="admin-section-heading">
+          <div>
+            <h3>${kind.icon} ${kind.label}</h3>
+            <p>${kind.id === 'accommodation'
+              ? 'Hoteles y alojamientos reutilizables como inicio, final o parada.'
+              : 'Estaciones, aeropuertos y otros puntos de transporte.'}</p>
+          </div>
+        </div>
+        <div class="admin-location-list">
+          ${rows || '<p class="admin-muted">Todavia no hay ubicaciones de este tipo.</p>'}
+        </div>
+      </section>
+    `;
+  }).join('');
+
+  const dayRows = Array.from({ length: totalTripDays }, (_, index) => {
+    const day = index + 1;
+    const plan = dayPlanByDay.get(day) || normalizeDayPlanRecord({ day });
+    return `
+      <div class="admin-day-location-row" data-day="${day}">
+        <div class="admin-day-location-label"><strong>Dia ${day}</strong></div>
+        <label>
+          <span>Inicio</span>
+          <select data-day-plan-field="startLocationId" data-day="${day}">
+            ${renderLocationOptions(locations, plan.startLocationId, { kind: 'accommodation' })}
+          </select>
+        </label>
+        <label>
+          <span>Final</span>
+          <select data-day-plan-field="endLocationId" data-day="${day}">
+            ${renderLocationOptions(locations, plan.endLocationId, { kind: 'accommodation' })}
+          </select>
+        </label>
+        <label>
+          <span>Llegada</span>
+          <select data-day-plan-field="endTravelModeFromPrevious" data-day="${day}">
+            ${TRAVEL_MODES.map((mode) => `<option value="${mode.id}" ${mode.id === plan.endTravelModeFromPrevious ? 'selected' : ''}>${mode.icon} ${mode.label}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+    `;
+  }).join('');
+
+  return renderAdminPanel('ubicaciones', 'Ubicaciones', 'Alojamientos, transporte y anclas de cada jornada.', `
+    <div class="admin-location-toolbar">
+      <div>
+        <h3>Catalogo de ubicaciones</h3>
+        <p>Una ubicacion puede reutilizarse cualquier numero de veces sin duplicarla.</p>
+      </div>
+      <button type="button" id="btn-add-location" class="admin-action-btn primary compact">+ Anadir ubicacion</button>
+    </div>
+
+    <div class="admin-location-grid">${locationRows}</div>
+
+    <div class="admin-card admin-day-plan-card">
+      <div class="admin-section-heading">
+        <div>
+          <h3>Inicio y final por dia</h3>
+          <p>Las anclas se colocan automaticamente antes y despues de las actividades.</p>
+        </div>
+      </div>
+      <div class="admin-location-bulk">
+        <label><span>Desde</span><input type="number" id="location-bulk-from" min="1" max="${totalTripDays}" value="1"></label>
+        <label><span>Hasta</span><input type="number" id="location-bulk-to" min="1" max="${totalTripDays}" value="${totalTripDays}"></label>
+        <label class="admin-location-bulk-select"><span>Alojamiento</span><select id="location-bulk-id">${renderLocationOptions(locations, '', { kind: 'accommodation', emptyLabel: 'Selecciona alojamiento' })}</select></label>
+        <label class="admin-check-inline"><input type="checkbox" id="location-bulk-start" checked> Inicio</label>
+        <label class="admin-check-inline"><input type="checkbox" id="location-bulk-end" checked> Final</label>
+        <button type="button" id="btn-apply-location-bulk" class="admin-action-btn primary compact">Aplicar al rango</button>
+      </div>
+      <div class="admin-day-location-list">${dayRows}</div>
+      <p id="locations-msg" class="admin-inline-msg"></p>
+    </div>
+  `, activeTab);
+}
+
 const ADMIN_TABS = [
   {
     id: 'viaje',
     icon: '&#x1F5FA;&#xFE0F;',
     label: 'Viaje y ciudades',
     description: 'Fechas y estructura'
+  },
+  {
+    id: 'ubicaciones',
+    icon: '&#x1F4CD;',
+    label: 'Ubicaciones',
+    description: 'Hoteles y transporte'
   },
   {
     id: 'datos',
@@ -491,6 +694,8 @@ async function render() {
   const citiesArray = sortCities(await getAll('cities'));
   const settingsArray = await getAll('settings');
   const globalSettings = settingsArray.find(s => s.id === 'global') || {};
+  const locations = (await getAll('locations')).map(normalizeLocationRecord);
+  const dayPlans = (await getAll('dayPlans')).map(normalizeDayPlanRecord);
   const activeTab = getAdminActiveTab();
 
   app.innerHTML = `
@@ -564,6 +769,8 @@ async function render() {
               </div>
             </div>
           `, activeTab)}
+
+          ${renderLocationsAdminPanel(locations, dayPlans, citiesArray, globalSettings, activeTab)}
 
           ${renderAdminPanel('datos', 'Datos', 'Importaci&oacute;n y exportaci&oacute;n de actividades y planificaci&oacute;n.', `
             <div class="admin-data-grid">
@@ -666,7 +873,7 @@ async function render() {
     </div>
   `;
 
-  attachEvents(citiesArray);
+  attachEvents(citiesArray, locations, dayPlans);
 }
 
 function renderAddCityForm() {
@@ -820,7 +1027,254 @@ function openAddCityModal() {
   window.setTimeout(() => document.getElementById('city-id')?.focus(), 0);
 }
 
-function attachEvents(citiesArray = []) {
+function renderLocationForm(location, citiesArray, existingLocations) {
+  const isEdit = Boolean(location?.id);
+  const draft = normalizeLocationRecord(location || {
+    id: '',
+    name: '',
+    kind: 'accommodation',
+    subtype: 'hotel',
+    active: true
+  });
+  const generatedId = isEdit
+    ? draft.id
+    : createLocationId(draft.name, existingLocations.map((entry) => entry.id));
+  const subtypeOptions = LOCATION_SUBTYPES[draft.kind] || [];
+
+  return `
+    <div class="modal-scroll admin-location-modal">
+      <div class="modal-header">
+        <div>
+          <span class="admin-modal-kicker">Ubicacion reutilizable</span>
+          <h2>${isEdit ? 'Editar ubicacion' : 'Nueva ubicacion'}</h2>
+        </div>
+        <button class="modal-close" id="admin-modal-close" aria-label="Cerrar">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-location" class="admin-form" data-editing-id="${escapeHtml(isEdit ? draft.id : '')}">
+          <input type="hidden" id="location-id" value="${escapeHtml(generatedId)}">
+          <div class="admin-form-grid compact">
+            <div class="form-group">
+              <label>Nombre *</label>
+              <input type="text" id="location-name" value="${escapeHtml(draft.name)}" required placeholder="Ej: Hotel de Shinjuku">
+            </div>
+            <div class="form-group">
+              <label>Categoria *</label>
+              <select id="location-kind">
+                ${LOCATION_KINDS.map((kind) => `<option value="${kind.id}" ${kind.id === draft.kind ? 'selected' : ''}>${kind.icon} ${kind.label}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="admin-form-grid compact">
+            <div class="form-group">
+              <label>Tipo *</label>
+              <select id="location-subtype">
+                ${subtypeOptions.map((subtype) => `<option value="${subtype.id}" ${subtype.id === draft.subtype ? 'selected' : ''}>${subtype.label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Ciudad</label>
+              <select id="location-city-id">
+                <option value="">Sin ciudad concreta</option>
+                ${citiesArray.map((city) => `<option value="${escapeHtml(city.id)}" ${city.id === draft.cityId ? 'selected' : ''}>${escapeHtml(city.name)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Direccion</label>
+            <input type="text" id="location-address" value="${escapeHtml(draft.address || '')}" placeholder="Direccion completa">
+          </div>
+          <div class="admin-form-grid compact">
+            <div class="form-group">
+              <label>Latitud</label>
+              <input type="number" id="location-lat" value="${draft.lat ?? ''}" step="any">
+            </div>
+            <div class="form-group">
+              <label>Longitud</label>
+              <input type="number" id="location-lng" value="${draft.lng ?? ''}" step="any">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Notas</label>
+            <textarea id="location-notes" rows="3" placeholder="Check-in, acceso, consigna, linea de tren...">${escapeHtml(draft.notes || '')}</textarea>
+          </div>
+          <label class="admin-check-inline"><input type="checkbox" id="location-active" ${draft.active !== false ? 'checked' : ''}> Ubicacion activa</label>
+          <p id="location-form-error" class="admin-inline-msg"></p>
+          <div class="admin-modal-actions">
+            <button type="button" class="filter-pill" id="admin-modal-cancel">Cancelar</button>
+            <button type="submit" class="filter-pill active">Guardar ubicacion</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function openLocationModal(location, citiesArray, existingLocations) {
+  const modalOverlay = document.getElementById('admin-modal-overlay');
+  const modal = document.getElementById('admin-modal');
+  if (!modalOverlay || !modal) return;
+
+  modal.innerHTML = renderLocationForm(location, citiesArray, existingLocations);
+  modalOverlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  const nameInput = document.getElementById('location-name');
+  const idInput = document.getElementById('location-id');
+  if (!location?.id) {
+    nameInput?.addEventListener('input', () => {
+      idInput.value = createLocationId(nameInput.value, existingLocations.map((entry) => entry.id));
+    });
+  }
+
+  document.getElementById('location-kind')?.addEventListener('change', (event) => {
+    const subtypeSelect = document.getElementById('location-subtype');
+    const subtypeOptions = LOCATION_SUBTYPES[event.target.value] || [];
+    subtypeSelect.innerHTML = subtypeOptions
+      .map((subtype) => `<option value="${subtype.id}">${subtype.label}</option>`)
+      .join('');
+  });
+
+  document.getElementById('admin-modal-close')?.addEventListener('click', closeAdminModal);
+  document.getElementById('admin-modal-cancel')?.addEventListener('click', closeAdminModal);
+  document.getElementById('form-location')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const editingId = event.currentTarget.dataset.editingId || null;
+    const latRaw = document.getElementById('location-lat').value.trim();
+    const lngRaw = document.getElementById('location-lng').value.trim();
+    const locationDraft = {
+      ...(location || {}),
+      id: document.getElementById('location-id').value.trim(),
+      name: document.getElementById('location-name').value.trim(),
+      kind: document.getElementById('location-kind').value,
+      subtype: document.getElementById('location-subtype').value,
+      cityId: document.getElementById('location-city-id').value,
+      address: document.getElementById('location-address').value.trim(),
+      lat: latRaw,
+      lng: lngRaw,
+      notes: document.getElementById('location-notes').value.trim(),
+      active: document.getElementById('location-active').checked
+    };
+    const validationError = validateLocationRecord(locationDraft);
+    if (validationError) {
+      showInlineMessage('location-form-error', validationError, 'error');
+      return;
+    }
+    const nextLocation = normalizeLocationRecord(locationDraft);
+    if (!editingId && existingLocations.some((entry) => entry.id === nextLocation.id)) {
+      showInlineMessage('location-form-error', 'Ya existe una ubicacion con ese ID.', 'error');
+      return;
+    }
+
+    await putAll('locations', [nextLocation]);
+    closeAdminModal();
+    showAdminToast('Ubicacion guardada correctamente.');
+    render();
+  });
+  window.setTimeout(() => nameInput?.focus(), 0);
+}
+
+async function deleteLocationAndReferences(locationId) {
+  const [dayPlans, plannerStops] = await Promise.all([
+    getAll('dayPlans'),
+    getAll('plannerStops')
+  ]);
+  const updatedDayPlans = dayPlans.map((plan) => normalizeDayPlanRecord({
+    ...plan,
+    startLocationId: plan.startLocationId === locationId ? null : plan.startLocationId,
+    endLocationId: plan.endLocationId === locationId ? null : plan.endLocationId
+  }));
+  const remainingStops = plannerStops
+    .map(normalizePlannerStopRecord)
+    .filter((stop) => stop.locationId !== locationId);
+
+  await remove('locations', locationId);
+  if (updatedDayPlans.length) await putAll('dayPlans', updatedDayPlans);
+  await clear('plannerStops');
+  if (remainingStops.length) await putAll('plannerStops', remainingStops);
+}
+
+function attachLocationAdminEvents(citiesArray, locations, dayPlans) {
+  document.getElementById('btn-add-location')?.addEventListener('click', () => {
+    openLocationModal(null, citiesArray, locations);
+  });
+
+  document.querySelectorAll('.btn-edit-location').forEach((button) => {
+    button.addEventListener('click', () => {
+      const location = locations.find((entry) => entry.id === button.dataset.locationId);
+      if (location) openLocationModal(location, citiesArray, locations);
+    });
+  });
+
+  document.querySelectorAll('.btn-delete-location').forEach((button) => {
+    button.addEventListener('click', () => {
+      const location = locations.find((entry) => entry.id === button.dataset.locationId);
+      if (!location) return;
+      openAdminConfirmModal({
+        title: 'Eliminar ubicacion',
+        message: `Se eliminara <strong>${escapeHtml(location.name)}</strong>, sus paradas y sus asignaciones como inicio o final.`,
+        confirmLabel: 'Eliminar ubicacion',
+        onConfirm: async () => {
+          await deleteLocationAndReferences(location.id);
+          showAdminToast('Ubicacion y referencias eliminadas.');
+          render();
+        }
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-day-plan-field]').forEach((select) => {
+    select.addEventListener('change', async () => {
+      const day = Number.parseInt(select.dataset.day, 10);
+      const existing = dayPlans.find((plan) => Number(plan.day) === day) || { day };
+      const updated = normalizeDayPlanRecord({
+        ...existing,
+        [select.dataset.dayPlanField]: select.value || null
+      });
+      await putAll('dayPlans', [updated]);
+      const index = dayPlans.findIndex((plan) => Number(plan.day) === day);
+      if (index >= 0) dayPlans[index] = updated;
+      else dayPlans.push(updated);
+      showInlineMessage('locations-msg', `Dia ${day} actualizado.`);
+    });
+  });
+
+  document.getElementById('btn-apply-location-bulk')?.addEventListener('click', async () => {
+    const from = Number.parseInt(document.getElementById('location-bulk-from').value, 10);
+    const to = Number.parseInt(document.getElementById('location-bulk-to').value, 10);
+    const locationId = document.getElementById('location-bulk-id').value;
+    const applyStart = document.getElementById('location-bulk-start').checked;
+    const applyEnd = document.getElementById('location-bulk-end').checked;
+    const totalTripDays = Number.parseInt(document.getElementById('location-bulk-to').max, 10);
+    if (
+      !locationId
+      || !Number.isFinite(from)
+      || !Number.isFinite(to)
+      || from < 1
+      || to > totalTripDays
+      || from > to
+      || (!applyStart && !applyEnd)
+    ) {
+      showInlineMessage('locations-msg', 'Selecciona un alojamiento, un rango valido y al menos inicio o final.', 'error');
+      return;
+    }
+
+    const updates = [];
+    for (let day = from; day <= to; day += 1) {
+      const existing = dayPlans.find((plan) => Number(plan.day) === day) || { day };
+      updates.push(normalizeDayPlanRecord({
+        ...existing,
+        startLocationId: applyStart ? locationId : existing.startLocationId,
+        endLocationId: applyEnd ? locationId : existing.endLocationId
+      }));
+    }
+    await putAll('dayPlans', updates);
+    showAdminToast(`Alojamiento aplicado del dia ${from} al ${to}.`);
+    render();
+  });
+}
+
+function attachEvents(citiesArray = [], locations = [], dayPlans = []) {
   document.querySelectorAll('[data-admin-tab]').forEach((button) => {
     button.addEventListener('click', () => setActiveAdminTab(button.dataset.adminTab));
   });
@@ -830,6 +1284,7 @@ function attachEvents(citiesArray = []) {
   });
 
   document.getElementById('btn-add-city')?.addEventListener('click', openAddCityModal);
+  attachLocationAdminEvents(citiesArray, locations, dayPlans);
 
   window.removeEventListener('hashchange', syncAdminTabsFromHash);
   window.addEventListener('hashchange', syncAdminTabsFromHash);
@@ -889,7 +1344,14 @@ function attachEvents(citiesArray = []) {
       return;
     }
 
-    await putAll('settings', [{ id: 'global', startDate: start, endDate: end, mapLinkStyle }]);
+    const currentGlobalSettings = await getById('settings', 'global') || {};
+    await putAll('settings', [{
+      ...currentGlobalSettings,
+      id: 'global',
+      startDate: start,
+      endDate: end,
+      mapLinkStyle
+    }]);
     showInlineMessage('settings-msg', 'Ajustes actualizados correctamente.');
     setTimeout(() => { clearInlineMessage('settings-msg'); }, 3000);
   });
@@ -898,9 +1360,13 @@ function attachEvents(citiesArray = []) {
   document.getElementById('btn-export').addEventListener('click', async () => {
     const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
     const data = {
+      schemaVersion: BACKUP_SCHEMA_VERSION,
       cities: sortCities(await getAll('cities')).map((city, index) => normalizeCityRecord(city, index)),
       places: places.map((place) => toImportExportRow(place)),
       planner: buildPlannerExportRows(await getAll('planner'), places),
+      locations: (await getAll('locations')).map(normalizeLocationRecord),
+      dayPlans: (await getAll('dayPlans')).map(normalizeDayPlanRecord),
+      plannerStops: (await getAll('plannerStops')).map(normalizePlannerStopRecord),
       settings: await getAll('settings')
     };
     downloadJsonFile(data, `japon2026_backup_${new Date().toISOString().slice(0,10)}.json`);
@@ -948,13 +1414,28 @@ function attachEvents(citiesArray = []) {
               if (result.item) importedPlanner.push(result.item);
             });
           }
+          const importedLocations = Array.isArray(data.locations)
+            ? normalizeImportedLocations(data.locations)
+            : [];
+          const importedDayPlans = Array.isArray(data.dayPlans)
+            ? normalizeImportedDayPlans(data.dayPlans, importedLocations, totalTripDays)
+            : [];
+          const importedPlannerStops = Array.isArray(data.plannerStops)
+            ? normalizeImportedPlannerStops(data.plannerStops, importedLocations, totalTripDays)
+            : [];
 
           await clear('cities');
           await clear('places');
           await clear('planner');
+          await clear('locations');
+          await clear('dayPlans');
+          await clear('plannerStops');
           await putAll('cities', importedCities);
           if (importedPlaces.length) await putAll('places', importedPlaces);
           if (importedPlanner.length) await putAll('planner', importedPlanner);
+          if (importedLocations.length) await putAll('locations', importedLocations);
+          if (importedDayPlans.length) await putAll('dayPlans', importedDayPlans);
+          if (importedPlannerStops.length) await putAll('plannerStops', importedPlannerStops);
           if (Array.isArray(data.settings)) {
             await clear('settings');
             if (data.settings.length) await putAll('settings', data.settings);
@@ -978,7 +1459,13 @@ function attachEvents(citiesArray = []) {
 
   document.getElementById('btn-export-planner-json')?.addEventListener('click', async () => {
     const plannerData = buildPlannerExportRows(await getAll('planner'), await getAll('places'));
-    downloadJsonFile({ planner: plannerData }, `japon2026_planner_${new Date().toISOString().slice(0,10)}.json`);
+    downloadJsonFile({
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      planner: plannerData,
+      locations: (await getAll('locations')).map(normalizeLocationRecord),
+      dayPlans: (await getAll('dayPlans')).map(normalizeDayPlanRecord),
+      plannerStops: (await getAll('plannerStops')).map(normalizePlannerStopRecord)
+    }, `japon2026_planner_${new Date().toISOString().slice(0,10)}.json`);
     showInlineMessage('planner-import-msg', 'Planificacion exportada correctamente.');
     setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
   });
@@ -992,6 +1479,21 @@ function attachEvents(citiesArray = []) {
     const worksheet = XLSX.utils.json_to_sheet(plannerData, { header: PLANNER_IMPORT_EXPORT_FIELDS });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Planificacion');
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet((await getAll('plannerStops')).map(normalizePlannerStopRecord)),
+      'Paradas'
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet((await getAll('dayPlans')).map(normalizeDayPlanRecord)),
+      'Dias'
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet((await getAll('locations')).map(normalizeLocationRecord)),
+      'Ubicaciones'
+    );
     XLSX.writeFile(workbook, `japon2026_planner_${new Date().toISOString().slice(0,10)}.xlsx`);
     showInlineMessage('planner-import-msg', 'Planificacion exportada a Excel correctamente.');
     setTimeout(() => { clearInlineMessage('planner-import-msg'); }, 3000);
@@ -1041,6 +1543,30 @@ function attachEvents(citiesArray = []) {
         await clear('planner');
         const validItems = Array.from(byPlaceId.values());
         if (validItems.length) await putAll('planner', validItems);
+        if (!Array.isArray(payload)) {
+          const importedLocations = Array.isArray(payload.locations)
+            ? normalizeImportedLocations(payload.locations)
+            : null;
+          const effectiveLocations = importedLocations || (await getAll('locations')).map(normalizeLocationRecord);
+          const importedDayPlans = Array.isArray(payload.dayPlans)
+            ? normalizeImportedDayPlans(payload.dayPlans, effectiveLocations, totalTripDays)
+            : null;
+          const importedStops = Array.isArray(payload.plannerStops)
+            ? normalizeImportedPlannerStops(payload.plannerStops, effectiveLocations, totalTripDays)
+            : null;
+          if (importedLocations) {
+            await clear('locations');
+            if (importedLocations.length) await putAll('locations', importedLocations);
+          }
+          if (importedDayPlans) {
+            await clear('dayPlans');
+            if (importedDayPlans.length) await putAll('dayPlans', importedDayPlans);
+          }
+          if (importedStops) {
+            await clear('plannerStops');
+            if (importedStops.length) await putAll('plannerStops', importedStops);
+          }
+        }
         showInlineMessage('planner-import-msg', `Planificacion importada correctamente (${validItems.length} actividades).`);
         if (skipped > 0) {
           showAdminToast(`Se han ignorado ${skipped} actividades porque no existen en la base de datos actual.`, 'error');
@@ -1061,7 +1587,8 @@ function attachEvents(citiesArray = []) {
     reader.onload = async (ev) => {
       try {
         clearInlineMessage('planner-import-msg');
-        const plannerRows = parseWorkbookRows(ev.target.result);
+        const workbookData = parseWorkbook(ev.target.result);
+        const plannerRows = workbookData.rowsBySheet.Planificacion || workbookData.firstRows;
         if (!plannerRows.length) {
           showInlineMessage('planner-import-msg', 'El archivo de planificacion esta vacio.', 'error');
           return;
@@ -1087,6 +1614,34 @@ function attachEvents(citiesArray = []) {
         await clear('planner');
         const validItems = Array.from(byPlaceId.values());
         if (validItems.length) await putAll('planner', validItems);
+
+        const hasLocationsSheet = Object.prototype.hasOwnProperty.call(workbookData.rowsBySheet, 'Ubicaciones');
+        const hasDayPlansSheet = Object.prototype.hasOwnProperty.call(workbookData.rowsBySheet, 'Dias');
+        const hasStopsSheet = Object.prototype.hasOwnProperty.call(workbookData.rowsBySheet, 'Paradas');
+        const importedLocations = hasLocationsSheet
+          ? normalizeImportedLocations(workbookData.rowsBySheet.Ubicaciones)
+          : null;
+        const effectiveLocations = importedLocations || (await getAll('locations')).map(normalizeLocationRecord);
+        const importedDayPlans = hasDayPlansSheet
+          ? normalizeImportedDayPlans(workbookData.rowsBySheet.Dias, effectiveLocations, totalTripDays)
+          : null;
+        const importedStops = hasStopsSheet
+          ? normalizeImportedPlannerStops(workbookData.rowsBySheet.Paradas, effectiveLocations, totalTripDays)
+          : null;
+
+        if (importedLocations) {
+          await clear('locations');
+          if (importedLocations.length) await putAll('locations', importedLocations);
+        }
+        if (importedDayPlans) {
+          await clear('dayPlans');
+          if (importedDayPlans.length) await putAll('dayPlans', importedDayPlans);
+        }
+        if (importedStops) {
+          await clear('plannerStops');
+          if (importedStops.length) await putAll('plannerStops', importedStops);
+        }
+
         showInlineMessage('planner-import-msg', `Planificacion importada correctamente (${validItems.length} actividades).`);
         if (skipped > 0) {
           showAdminToast(`Se han ignorado ${skipped} filas porque la actividad, cityId, status o dia no son validos.`, 'error');
@@ -1111,10 +1666,16 @@ function attachEvents(citiesArray = []) {
         await clear('cities');
         await clear('places');
         await clear('planner');
+        await clear('locations');
+        await clear('dayPlans');
+        await clear('plannerStops');
         await clear('settings');
         await putAll('cities', demoDataset.cities);
         await putAll('places', demoDataset.places);
         await putAll('planner', demoDataset.planner);
+        if (demoDataset.locations.length) await putAll('locations', demoDataset.locations);
+        if (demoDataset.dayPlans.length) await putAll('dayPlans', demoDataset.dayPlans);
+        if (demoDataset.plannerStops.length) await putAll('plannerStops', demoDataset.plannerStops);
         await putAll('settings', demoDataset.settings);
         showAdminToast('Datos de ejemplo cargados correctamente.');
         render();
@@ -1132,18 +1693,33 @@ function attachEvents(citiesArray = []) {
         const plannerItems = await getAll('planner');
         if (scope === 'all') {
           await clear('planner');
-          showAdminToast(`Planificador limpiado correctamente (${plannerItems.length} registros eliminados).`);
+          await clear('plannerStops');
+          await clear('dayPlans');
+          showAdminToast(`Planificador y ubicaciones diarias limpiados (${plannerItems.length} actividades).`);
           render();
           return;
         }
 
         const places = (await getAll('places')).map((place) => normalizePlaceRecord(place));
+        const locations = (await getAll('locations')).map(normalizeLocationRecord);
+        const plannerStops = (await getAll('plannerStops')).map(normalizePlannerStopRecord);
+        const dayPlans = (await getAll('dayPlans')).map(normalizeDayPlanRecord);
         const targetPlaceIds = new Set(places.filter((place) => place.cityId === scope).map((place) => place.id));
+        const targetLocationIds = new Set(locations.filter((location) => location.cityId === scope).map((location) => location.id));
         const remainingPlanner = plannerItems.filter((item) => !targetPlaceIds.has(item.placeId));
+        const remainingStops = plannerStops.filter((stop) => !targetLocationIds.has(stop.locationId));
+        const updatedDayPlans = dayPlans.map((plan) => ({
+          ...plan,
+          startLocationId: targetLocationIds.has(plan.startLocationId) ? null : plan.startLocationId,
+          endLocationId: targetLocationIds.has(plan.endLocationId) ? null : plan.endLocationId
+        }));
         const removedCount = plannerItems.length - remainingPlanner.length;
 
         await clear('planner');
+        await clear('plannerStops');
         if (remainingPlanner.length) await putAll('planner', remainingPlanner.map((item) => normalizePlannerRecord(item)));
+        if (remainingStops.length) await putAll('plannerStops', remainingStops);
+        if (updatedDayPlans.length) await putAll('dayPlans', updatedDayPlans);
 
         const cityName = citiesArray.find((city) => city.id === scope)?.name || scope;
         showAdminToast(`Planificador de ${cityName} limpiado correctamente (${removedCount} registros eliminados).`);

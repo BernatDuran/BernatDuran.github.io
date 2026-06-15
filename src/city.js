@@ -1044,7 +1044,7 @@ export function initCityPage(cityMeta, places, citiesArray, initialPlannerItems,
   async function setPlannerState(placeId, newStatus, assignedDay = null) {
     let item = plannerItems.find(p => p.placeId === placeId);
     if (!item) {
-      item = { placeId, favorite: false, status: newStatus, assignedDay };
+      item = { placeId, favorite: false, status: newStatus, assignedDay, travelModeFromPrevious: 'walking' };
       plannerItems.push(item);
     } else {
       item.status = newStatus;
