@@ -19,6 +19,10 @@ https://bernatduran.github.io/
 - Crear y editar actividades desde las páginas de ciudad.
 - Gestionar el estado de cada actividad: sin asignar, en bandeja, planificada, realizada o descartada.
 - Planificar el viaje desde `/planner` arrastrando actividades entre bandeja y días.
+- Mantener un catálogo reutilizable de alojamientos y puntos de transporte.
+- Definir el alojamiento de inicio y final de cada jornada, también por rangos de días.
+- Insertar el mismo hotel, estación o aeropuerto varias veces como parada logística.
+- Indicar cómo se llega a cada punto: a pie, metro, tren, bus, taxi, coche u otro.
 - Usar una vista de calendario y una vista de mapa dentro del planner.
 - Ver rutas por día con marcadores numerados, leyenda, actividades omitidas por falta de coordenadas y tramos en línea recta.
 - Calcular distancia lineal entre actividades consecutivas y resumen diario de tramos.
@@ -50,6 +54,9 @@ Funcionalidades destacadas:
 - Bandeja de actividades pendientes.
 - Columnas por día del viaje.
 - Drag and drop para asignar, mover y reordenar actividades.
+- Anclas fijas de inicio y final del día, separadas de las actividades.
+- Paradas logísticas repetibles para alojamientos y transporte.
+- Modo de desplazamiento por tramo, con cálculo por calles limitado a los tramos a pie.
 - Resumen diario con número de actividades y duración aproximada.
 - Vista mapa por día o para todo el viaje.
 - Marcadores numerados según el orden real de cada día.
@@ -86,6 +93,15 @@ Cada actividad puede contener:
 
 Las actividades se crean y editan desde la página de ciudad correspondiente. El planner permite consultar y cambiar estado, pero no crear actividades nuevas.
 
+## Ubicaciones logísticas
+
+La pestaña `Ubicaciones` de `/admin` mantiene dos catálogos independientes:
+
+- Alojamientos: hotel, ryokan, apartamento, hostal u otro.
+- Transporte: estaciones de tren, metro o bus, aeropuertos, ferris u otros puntos.
+
+Los alojamientos pueden asignarse como inicio y final de cada día. Cualquier ubicación puede insertarse en mitad del itinerario como parada, con motivo, nota, duración y modo de llegada. Estas entradas se distinguen visualmente de las actividades y se incluyen en mapas, rutas, PDF y copias de seguridad.
+
 ## Importación y exportación
 
 La administración incluye varios flujos de datos:
@@ -94,6 +110,7 @@ La administración incluye varios flujos de datos:
 - Backup JSON general de la app.
 - Restauración de backup JSON.
 - Exportación/importación JSON específica de planificación.
+- Exportación Excel del planner con hojas de planificación, ubicaciones, días y paradas.
 - Validación de actividades existentes al importar planificación.
 
 Los campos de ubicación se manejan de forma separada con `address`, `lat` y `lng`.
@@ -106,6 +123,8 @@ La app usa IndexedDB como almacenamiento principal. Esto significa que:
 - No hay servidor ni base de datos remota.
 - El contenido puede diferir entre navegadores o dispositivos.
 - Los backups JSON son importantes para mover o restaurar información.
+
+Además de `cities`, `places`, `planner` y `settings`, la versión actual usa `locations`, `dayPlans` y `plannerStops` para separar el catálogo de ubicaciones de sus usos concretos en el itinerario.
 
 Desde `/admin` se pueden cargar datos de ejemplo o limpiar datos operativos cuando se quiera reiniciar la demo.
 
@@ -179,6 +198,12 @@ Generar versión de producción:
 
 ```bash
 npm run build
+```
+
+Ejecutar las pruebas del modelo de planificación:
+
+```bash
+npm test
 ```
 
 Previsualizar build:
